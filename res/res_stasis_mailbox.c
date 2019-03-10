@@ -95,6 +95,7 @@ struct ast_json *stasis_app_mailboxes_to_json()
 		}
 	}
 	ao2_iterator_destroy(&iter);
+	ao2_ref(mailboxes, -1);
 
 	return array;
 }
@@ -162,5 +163,4 @@ AST_MODULE_INFO(ASTERISK_GPL_KEY, AST_MODFLAG_GLOBAL_SYMBOLS, "Stasis applicatio
 	.support_level = AST_MODULE_SUPPORT_CORE,
 	.load = load_module,
 	.unload = unload_module,
-	.nonoptreq = "res_stasis,res_mwi_external"
 	);

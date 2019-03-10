@@ -35,6 +35,7 @@
 static void rewrite_uri(pjsip_rx_data *rdata, pjsip_sip_uri *uri)
 {
 	pj_cstr(&uri->host, rdata->pkt_info.src_name);
+	uri->port = rdata->pkt_info.src_port;
 	if (!strcasecmp("WSS", rdata->tp_info.transport->type_name)) {
 		/* WSS is special, we don't want to overwrite the URI at all as it needs to be ws */
 	} else if (strcasecmp("udp", rdata->tp_info.transport->type_name)) {
@@ -42,13 +43,44 @@ static void rewrite_uri(pjsip_rx_data *rdata, pjsip_sip_uri *uri)
 	} else {
 		uri->transport_param.slen = 0;
 	}
-	uri->port = rdata->pkt_info.src_port;
 }
+
+/*
+ * Update the Record-Route headers in the request or response and in the dialog
+ * object if exists.
+ *
+ * When NAT is in use, the address of the next hop in the SIP may be incorrect.
+ * To address this  asterisk uses two strategies in parallel:
+ *  1. intercept the messages at the transaction level and rewrite the
+ *     messages before arriving at the dialog layer
+ *  2. after the application processing, update the dialog object with the
+ *     correct information
+ *
+ * The first strategy has a limitation that the SIP message may not have all
+ * the information required to determine if the next hop is in the route set
+ * or in the contact. Causing risk that asterisk will update the Contact on
+ * receipt of an in-dialog message despite there being a route set saved in
+ * the dialog.
+ *
+ * The second strategy has a limitation that not all UAC layers have interfaces
+ * available to invoke this module after dialog creation.  (pjsip_sesion does
+ * but pjsip_pubsub does not), thus this strategy can't update the dialog in
+ * all cases needed.
+ *
+ * The ideal solution would be to implement an "incomming_request" event
+ * in pubsub module that can then pass the dialog object to this module
+ * on SUBSCRIBE, this module then should add itself as a listener to the dialog
+ * for the subsequent requests and responses & then be able to properly update
+ * the dialog object for all required events.
+ */
 
 static int rewrite_route_set(pjsip_rx_data *rdata, pjsip_dialog *dlg)
 {
 	pjsip_rr_hdr *rr = NULL;
 	pjsip_sip_uri *uri;
+	int res = -1;
+	int ignore_rr = 0;
+	int pubsub = 0;
 
 	if (rdata->msg_info.msg->type == PJSIP_RESPONSE_MSG) {
 		pjsip_hdr *iter;
@@ -60,21 +92,49 @@ static int rewrite_route_set(pjsip_rx_data *rdata, pjsip_dialog *dlg)
 		}
 	} else if (pjsip_method_cmp(&rdata->msg_info.msg->line.req.method, &pjsip_register_method)) {
 		rr = pjsip_msg_find_hdr(rdata->msg_info.msg, PJSIP_H_RECORD_ROUTE, NULL);
+	} else {
+		/**
+		 * Record-Route header has no meaning in REGISTER requests
+		 * and should be ignored
+		 */
+		ignore_rr = 1;
+	}
+
+	if (!pjsip_method_cmp(&rdata->msg_info.cseq->method, &pjsip_subscribe_method) ||
+		!pjsip_method_cmp(&rdata->msg_info.cseq->method, &pjsip_notify_method)) {
+		/**
+		 * There is currently no good way to get the dlg object for a pubsub dialog
+		 * so we will just look at the rr & contact of the current message and
+		 * hope for the best
+		 */
+		pubsub = 1;
 	}
 
 	if (rr) {
 		uri = pjsip_uri_get_uri(&rr->name_addr);
 		rewrite_uri(rdata, uri);
-		if (dlg && !pj_list_empty(&dlg->route_set) && !dlg->route_set_frozen) {
-			pjsip_routing_hdr *route = dlg->route_set.next;
-			uri = pjsip_uri_get_uri(&route->name_addr);
-			rewrite_uri(rdata, uri);
-		}
-
-		return 0;
+		res = 0;
 	}
 
-	return -1;
+	if (dlg && !pj_list_empty(&dlg->route_set) && !dlg->route_set_frozen) {
+		pjsip_routing_hdr *route = dlg->route_set.next;
+		uri = pjsip_uri_get_uri(&route->name_addr);
+		rewrite_uri(rdata, uri);
+		res = 0;
+	}
+
+	if (!dlg && !rr && !ignore_rr  && !pubsub && rdata->msg_info.to->tag.slen){
+		/**
+		 * Even if this message doesn't have any route headers
+		 * the dialog may, so wait until a later invocation that
+		 * has a dialog reference to make sure there isn't a
+		 * previously saved routset in the dialog before deciding
+		 * the contact needs to be modified
+		 */
+		res = 0;
+	}
+
+	return res;
 }
 
 static int rewrite_contact(pjsip_rx_data *rdata, pjsip_dialog *dlg)
@@ -165,7 +225,7 @@ static int find_transport_state_in_use(void *obj, void *arg, int flags)
 		((details->type == transport_state->type) && (transport_state->factory) &&
 			!pj_strcmp(&transport_state->factory->addr_name.host, &details->local_address) &&
 			transport_state->factory->addr_name.port == details->local_port))) {
-		return CMP_MATCH | CMP_STOP;
+		return CMP_MATCH;
 	}
 
 	return 0;
@@ -267,16 +327,16 @@ static pj_status_t nat_on_tx_message(pjsip_tx_data *tdata)
 		ast_sockaddr_set_port(&addr, tdata->tp_info.dst_port);
 
 		/* See if where we are sending this request is local or not, and if not that we can get a Contact URI to modify */
-		if (ast_apply_ha(transport_state->localnet, &addr) != AST_SENSE_ALLOW) {
+		if (ast_sip_transport_is_local(transport_state, &addr)) {
 			ast_debug(5, "Request is being sent to local address, skipping NAT manipulation\n");
 			return PJ_SUCCESS;
 		}
 	}
 
-	if (!ast_sockaddr_isnull(&transport_state->external_address)) {
+	if (!ast_sockaddr_isnull(&transport_state->external_signaling_address)) {
 		/* Update the contact header with the external address */
 		if (uri || (uri = nat_get_contact_sip_uri(tdata))) {
-			pj_strdup2(tdata->pool, &uri->host, ast_sockaddr_stringify_host(&transport_state->external_address));
+			pj_strdup2(tdata->pool, &uri->host, ast_sockaddr_stringify_host(&transport_state->external_signaling_address));
 			if (transport->external_signaling_port) {
 				uri->port = transport->external_signaling_port;
 				ast_debug(4, "Re-wrote Contact URI port to %d\n", uri->port);
@@ -285,7 +345,7 @@ static pj_status_t nat_on_tx_message(pjsip_tx_data *tdata)
 
 		/* Update the via header if relevant */
 		if ((tdata->msg->type == PJSIP_REQUEST_MSG) && (via || (via = pjsip_msg_find_hdr(tdata->msg, PJSIP_H_VIA, NULL)))) {
-			pj_strdup2(tdata->pool, &via->sent_by.host, ast_sockaddr_stringify_host(&transport_state->external_address));
+			pj_strdup2(tdata->pool, &via->sent_by.host, ast_sockaddr_stringify_host(&transport_state->external_signaling_address));
 			if (transport->external_signaling_port) {
 				via->sent_by.port = transport->external_signaling_port;
 			}

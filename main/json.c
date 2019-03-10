@@ -46,6 +46,21 @@ ASTERISK_FILE_VERSION(__FILE__, "$Revision$")
 #include <jansson.h>
 #include <time.h>
 
+#if defined(JANSSON_THREAD_SAFE_REFCOUNT)
+void *ast_json_malloc(size_t size)
+{
+	return ast_malloc(size);
+}
+
+void ast_json_free(void *p)
+{
+	ast_free(p);
+}
+
+/* No need to lock since jansson is thread safe. */
+#define SCOPED_JSON_LOCK(json)
+
+#else
 /*! \brief Magic number, for safety checks. */
 #define JSON_MAGIC 0x1541992
 
@@ -189,6 +204,7 @@ void ast_json_free(void *p)
 
 	AST_LIST_INSERT_HEAD(free_list, mem, list);
 }
+#endif
 
 void ast_json_set_alloc_funcs(void *(*malloc_fn)(size_t), void (*free_fn)(void*))
 {
@@ -202,7 +218,7 @@ void ast_json_reset_alloc_funcs(void)
 
 struct ast_json *ast_json_ref(struct ast_json *json)
 {
-	/* Jansson refcounting is non-atomic; lock it. */
+	/* If Jansson refcounting is non-atomic; lock it. */
 	SCOPED_JSON_LOCK(json);
 	json_incref((json_t *)json);
 	return json;
@@ -210,6 +226,9 @@ struct ast_json *ast_json_ref(struct ast_json *json)
 
 void ast_json_unref(struct ast_json *json)
 {
+#if defined(JANSSON_THREAD_SAFE_REFCOUNT)
+	json_decref((json_t *) json);
+#else
 	struct json_mem_list *free_list;
 	struct json_mem *mem;
 
@@ -234,6 +253,7 @@ void ast_json_unref(struct ast_json *json)
 	while ((mem = AST_LIST_REMOVE_HEAD(free_list, list))) {
 		json_mem_free(mem);
 	}
+#endif
 }
 
 enum ast_json_type ast_json_typeof(const struct ast_json *json)
@@ -457,16 +477,25 @@ struct ast_json *ast_json_stringf(const char *format, ...)
 
 struct ast_json *ast_json_vstringf(const char *format, va_list args)
 {
-	char *str = NULL;
 	json_t *ret = NULL;
 
 	if (format) {
+		/* json_pack was not introduced until jansson-2.0 so Asterisk could never
+		 * be compiled against older versions.  The version check can never match
+		 * anything older than 2.12. */
+#if defined(HAVE_JANSSON_BUNDLED) || JANSSON_MAJOR_VERSION > 2 || JANSSON_MINOR_VERSION > 11
+		ret = json_vsprintf(format, args);
+#else
+		char *str = NULL;
 		int err = ast_vasprintf(&str, format, args);
-		if (err > 0) {
+
+		if (err >= 0) {
 			ret = json_string(str);
 			ast_free(str);
 		}
+#endif
 	}
+
 	return (struct ast_json *)ret;
 }
 
@@ -666,7 +695,11 @@ char *ast_json_dump_string_format(struct ast_json *root, enum ast_json_encoding_
 {
 	/* Jansson's json_dump*, even though it's a read operation, isn't
 	 * thread safe for concurrent reads. Locking is necessary.
-	 * See http://www.digip.org/jansson/doc/2.4/portability.html#thread-safety. */
+	 * See http://www.digip.org/jansson/doc/2.4/portability.html#thread-safety.
+	 *
+	 * This comment does not apply when JANSSON_THREAD_SAFE_REFCOUNT is defined,
+	 * in that case SCOPED_JSON_LOCK is a no-op.
+	 */
 	SCOPED_JSON_LOCK(root);
 	return json_dumps((json_t *)root, dump_flags(format));
 }
@@ -706,7 +739,11 @@ int ast_json_dump_str_format(struct ast_json *root, struct ast_str **dst, enum a
 {
 	/* Jansson's json_dump*, even though it's a read operation, isn't
 	 * thread safe for concurrent reads. Locking is necessary.
-	 * See http://www.digip.org/jansson/doc/2.4/portability.html#thread-safety. */
+	 * See http://www.digip.org/jansson/doc/2.4/portability.html#thread-safety.
+	 *
+	 * This comment does not apply when JANSSON_THREAD_SAFE_REFCOUNT is defined,
+	 * in that case SCOPED_JSON_LOCK is a no-op.
+	 */
 	SCOPED_JSON_LOCK(root);
 	return json_dump_callback((json_t *)root, write_to_ast_str, dst, dump_flags(format));
 }
@@ -716,7 +753,11 @@ int ast_json_dump_file_format(struct ast_json *root, FILE *output, enum ast_json
 {
 	/* Jansson's json_dump*, even though it's a read operation, isn't
 	 * thread safe for concurrent reads. Locking is necessary.
-	 * See http://www.digip.org/jansson/doc/2.4/portability.html#thread-safety. */
+	 * See http://www.digip.org/jansson/doc/2.4/portability.html#thread-safety.
+	 *
+	 * This comment does not apply when JANSSON_THREAD_SAFE_REFCOUNT is defined,
+	 * in that case SCOPED_JSON_LOCK is a no-op.
+	 */
 	SCOPED_JSON_LOCK(root);
 	if (!root || !output) {
 		return -1;
@@ -727,7 +768,11 @@ int ast_json_dump_new_file_format(struct ast_json *root, const char *path, enum 
 {
 	/* Jansson's json_dump*, even though it's a read operation, isn't
 	 * thread safe for concurrent reads. Locking is necessary.
-	 * See http://www.digip.org/jansson/doc/2.4/portability.html#thread-safety. */
+	 * See http://www.digip.org/jansson/doc/2.4/portability.html#thread-safety.
+	 *
+	 * This comment does not apply when JANSSON_THREAD_SAFE_REFCOUNT is defined,
+	 * in that case SCOPED_JSON_LOCK is a no-op.
+	 */
 	SCOPED_JSON_LOCK(root);
 	if (!root || !path) {
 		return -1;
@@ -825,6 +870,7 @@ struct ast_json *ast_json_vpack(char const *format, va_list ap)
 			ast_log(LOG_ERROR,
 				"Error building JSON from '%s': %s.\n",
 				format, error.text);
+			ast_log_backtrace();
 		}
 	}
 	return r;
@@ -1009,6 +1055,7 @@ struct ast_json *ast_json_party_id(struct ast_party_id *party)
 enum ast_json_to_ast_vars_code ast_json_to_ast_variables(struct ast_json *json_variables, struct ast_variable **variables)
 {
 	struct ast_json_iter *it_json_var;
+	struct ast_variable *tail = NULL;
 
 	*variables = NULL;
 
@@ -1045,7 +1092,7 @@ enum ast_json_to_ast_vars_code ast_json_to_ast_variables(struct ast_json *json_v
 			return AST_JSON_TO_AST_VARS_CODE_OOM;
 		}
 
-		ast_variable_list_append(variables, new_var);
+		tail = ast_variable_list_append_hint(variables, tail, new_var);
 	}
 
 	return AST_JSON_TO_AST_VARS_CODE_SUCCESS;

@@ -451,9 +451,12 @@ void ast_http_send(struct ast_tcptls_session_instance *ser,
 	struct timeval now = ast_tvnow();
 	struct ast_tm tm;
 	char timebuf[80];
+	char buf[256];
+	int len;
 	int content_length = 0;
 	int close_connection;
 	struct ast_str *server_header_field = ast_str_create(MAX_SERVER_NAME_LENGTH);
+	int send_content;
 
 	if (!ser || !ser->f || !server_header_field) {
 		/* The connection is not open. */
@@ -504,8 +507,10 @@ void ast_http_send(struct ast_tcptls_session_instance *ser,
 		lseek(fd, 0, SEEK_SET);
 	}
 
+	send_content = method != AST_HTTP_HEAD || status_code >= 400;
+
 	/* send http header */
-	fprintf(ser->f,
+	if (fprintf(ser->f,
 		"HTTP/1.1 %d %s\r\n"
 		"%s"
 		"Date: %s\r\n"
@@ -513,43 +518,30 @@ void ast_http_send(struct ast_tcptls_session_instance *ser,
 		"%s"
 		"%s"
 		"Content-Length: %d\r\n"
-		"\r\n",
+		"\r\n"
+		"%s",
 		status_code, status_title ? status_title : "OK",
 		ast_str_buffer(server_header_field),
 		timebuf,
 		close_connection ? "Connection: close\r\n" : "",
 		static_content ? "" : "Cache-Control: no-cache, no-store\r\n",
 		http_header ? ast_str_buffer(http_header) : "",
-		content_length
-		);
-
-	/* send content */
-	if (method != AST_HTTP_HEAD || status_code >= 400) {
-		if (out && ast_str_strlen(out)) {
+		content_length,
+		send_content && out && ast_str_strlen(out) ? ast_str_buffer(out) : ""
+		) <= 0) {
+		ast_debug(1, "fprintf() failed: %s\n", strerror(errno));
+		close_connection = 1;
+	} else if (send_content && fd) {
+		/* send file content */
+		while ((len = read(fd, buf, sizeof(buf))) > 0) {
 			/*
 			 * NOTE: Because ser->f is a non-standard FILE *, fwrite() will probably not
 			 * behave exactly as documented.
 			 */
-			if (fwrite(ast_str_buffer(out), ast_str_strlen(out), 1, ser->f) != 1) {
-				ast_log(LOG_ERROR, "fwrite() failed: %s\n", strerror(errno));
+			if (fwrite(buf, len, 1, ser->f) != 1) {
+				ast_debug(1, "fwrite() failed: %s\n", strerror(errno));
 				close_connection = 1;
-			}
-		}
-
-		if (fd) {
-			char buf[256];
-			int len;
-
-			while ((len = read(fd, buf, sizeof(buf))) > 0) {
-				/*
-				 * NOTE: Because ser->f is a non-standard FILE *, fwrite() will probably not
-				 * behave exactly as documented.
-				 */
-				if (fwrite(buf, len, 1, ser->f) != 1) {
-					ast_log(LOG_WARNING, "fwrite() failed: %s\n", strerror(errno));
-					close_connection = 1;
-					break;
-				}
+				break;
 			}
 		}
 	}
@@ -1780,11 +1772,19 @@ static int http_request_headers_get(struct ast_tcptls_session_instance *ser, str
 
 	remaining_headers = MAX_HTTP_REQUEST_HEADERS;
 	for (;;) {
+		size_t len;
 		char *name;
 		char *value;
 
 		if (!fgets(header_line, sizeof(header_line), ser->f)) {
 			ast_http_error(ser, 400, "Bad Request", "Timeout");
+			return -1;
+		}
+		len = strlen(header_line);
+		if (!len || header_line[len - 1] != '\n') {
+			/* We didn't get a full line */
+			ast_http_error(ser, 400, "Bad Request",
+				(len == sizeof(header_line) - 1) ? "Header line too long" : "Timeout");
 			return -1;
 		}
 
@@ -1855,6 +1855,7 @@ static int httpd_process_request(struct ast_tcptls_session_instance *ser)
 	struct http_worker_private_data *request;
 	enum ast_http_method http_method = AST_HTTP_UNKNOWN;
 	int res;
+	size_t len;
 	char request_line[MAX_HTTP_LINE_LENGTH];
 
 	if (!fgets(request_line, sizeof(request_line), ser->f)) {
@@ -1864,6 +1865,14 @@ static int httpd_process_request(struct ast_tcptls_session_instance *ser)
 	/* Re-initialize the request body tracking data. */
 	request = ser->private_data;
 	http_request_tracking_init(request);
+
+	len = strlen(request_line);
+	if (!len || request_line[len - 1] != '\n') {
+		/* We didn't get a full line */
+		ast_http_error(ser, 400, "Bad Request",
+			(len == sizeof(request_line) - 1) ? "Request line too long" : "Timeout");
+		return -1;
+	}
 
 	/* Get method */
 	method = ast_skip_blanks(request_line);
@@ -1963,9 +1972,7 @@ static void *httpd_helper_thread(void *data)
 	}
 
 	/* make sure socket is non-blocking */
-	flags = fcntl(ser->fd, F_GETFL);
-	flags |= O_NONBLOCK;
-	fcntl(ser->fd, F_SETFL, flags);
+	ast_fd_set_flags(ser->fd, O_NONBLOCK);
 
 	/* Setup HTTP worker private data to keep track of request body reading. */
 	ao2_cleanup(ser->private_data);
@@ -2100,7 +2107,15 @@ static int __ast_http_load(int reload)
 	int http_tls_was_enabled = 0;
 
 	cfg = ast_config_load2("http.conf", "http", config_flags);
-	if (!cfg || cfg == CONFIG_STATUS_FILEUNCHANGED || cfg == CONFIG_STATUS_FILEINVALID) {
+	if (!cfg || cfg == CONFIG_STATUS_FILEINVALID) {
+		return 0;
+	}
+
+	/* Even if the http.conf hasn't been updated, the TLS certs/keys may have been */
+	if (cfg == CONFIG_STATUS_FILEUNCHANGED) {
+		if (http_tls_cfg.enabled && ast_ssl_setup(https_desc.tls_cfg)) {
+			ast_tcptls_server_start(&https_desc);
+		}
 		return 0;
 	}
 

@@ -1,6 +1,6 @@
 #
 # Asterisk -- An open source telephony toolkit.
-# 
+#
 # Various utilities
 #
 # Copyright (C) 1999-2006, Digium
@@ -22,7 +22,7 @@ ASTTOPDIR?=..
 #     the 1.2 days. The neat part is that it will actually evaluate the expressions.
 #     Users could use this to quickly check expressions in their .ael file.
 # to get check_expr2, add it to the ALL_UTILS list -- this is a program that will
-#     read in a file containing expressions (as if they were in $[ ]), one per line. 
+#     read in a file containing expressions (as if they were in $[ ]), one per line.
 #     It will, of course signal any syntax errors. Devs (like murf) should use this whenever
 #     changes are made to ast_expr2.y or ast_expr2.fl (or the corresponding .c files),
 #     as a regression test. Others (mere mortals?) need not bother, but they are
@@ -77,7 +77,7 @@ install:
 		if [ "$$x" != "none" ]; then \
 			$(INSTALL) -m 755 $$x "$(DESTDIR)$(ASTSBINDIR)/$$x"; \
 		fi; \
-	done 
+	done
 
 uninstall:
 	for x in $(ALL_UTILS); do rm -f "$(DESTDIR)$(ASTSBINDIR)/$$x"; done
@@ -157,8 +157,8 @@ aelparse.c: $(ASTTOPDIR)/res/ael/ael_lex.c
 	$(CMD_PREFIX) sed 's/ast_debug([[:digit:]][[:digit:]]*/ast_log(LOG_DEBUG/' "$@" > "$@.new"
 	$(CMD_PREFIX) mv "$@.new" "$@"
 
-aelparse.o: _ASTCFLAGS+=-I$(ASTTOPDIR)/res -Wno-unused
-aelparse: LIBS+=-lm
+aelparse.o: _ASTCFLAGS+=-I$(ASTTOPDIR)/res -Wno-unused $(AST_NO_FORMAT_TRUNCATION)
+aelparse: LIBS+=-lm $(AST_CLANG_BLOCKS_LIBS)
 aelparse: aelparse.o aelbison.o pbx_ael.o hashtab.o lock.o ael_main.o ast_expr2f.o ast_expr2.o strcompat.o pval.o extconf.o
 
 threadstorage.c: $(ASTTOPDIR)/main/threadstorage.c
@@ -168,6 +168,7 @@ threadstorage.c: $(ASTTOPDIR)/main/threadstorage.c
 
 extconf.o: extconf.c
 
+conf2ael: LIBS+=$(AST_CLANG_BLOCKS_LIBS)
 conf2ael: conf2ael.o ast_expr2f.o ast_expr2.o hashtab.o lock.o aelbison.o aelparse.o pbx_ael.o pval.o extconf.o strcompat.o
 
 check_expr2: $(ASTTOPDIR)/main/ast_expr2f.c $(ASTTOPDIR)/main/ast_expr2.c $(ASTTOPDIR)/main/ast_expr2.h
@@ -176,9 +177,9 @@ check_expr2: $(ASTTOPDIR)/main/ast_expr2f.c $(ASTTOPDIR)/main/ast_expr2.c $(ASTT
 	$(ECHO_PREFIX) echo "   [CC] ast_expr2.c -> ast_expr2z.o"
 	$(CC) -g -c -I$(ASTTOPDIR)/include -DSTANDALONE2 $(ASTTOPDIR)/main/ast_expr2.c -o ast_expr2z.o
 	$(ECHO_PREFIX) echo "   [LD] ast_expr2fz.o ast_expr2z.o  -> check_expr2"
-	$(CC) -g -o check_expr2 ast_expr2fz.o ast_expr2z.o -lm
+	$(CC) -g -o check_expr2 ast_expr2fz.o ast_expr2z.o -lm $(_ASTLDFLAGS)
 	$(ECHO_PREFIX) echo "   [RM] ast_expr2fz.o ast_expr2z.o"
-	rm ast_expr2z.o ast_expr2fz.o 
+	rm ast_expr2z.o ast_expr2fz.o
 	./check_expr2 expr2.testinput
 
 smsq: smsq.o strcompat.o

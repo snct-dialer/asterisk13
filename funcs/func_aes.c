@@ -23,6 +23,7 @@
  */
 
 /*** MODULEINFO
+	<use type="module">res_crypto</use>
 	<use type="external">crypto</use>
 	<support_level>core</support_level>
  ***/
@@ -182,5 +183,4 @@ AST_MODULE_INFO(ASTERISK_GPL_KEY, AST_MODFLAG_DEFAULT, "AES dialplan functions",
 		.support_level = AST_MODULE_SUPPORT_CORE,
 		.load = load_module,
 		.unload = unload_module,
-		.nonoptreq = "res_crypto",
-	);
+	       );

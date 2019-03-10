@@ -3709,49 +3709,49 @@ static char *skinny_debugs(void)
 	int posn = 0;
 
 	ptr = dbgcli_buf;
-	strncpy(ptr, "\0", 1);
+	ptr[0] = '\0';
 	if (skinnydebug & DEBUG_GENERAL) {
-		strncpy(ptr, "general ", 8);
+		strcpy(ptr, "general "); /* SAFE */
 		posn += 8;
 		ptr += 8;
 	}
 	if (skinnydebug & DEBUG_SUB) {
-		strncpy(ptr, "sub ", 4);
+		strcpy(ptr, "sub "); /* SAFE */
 		posn += 4;
 		ptr += 4;
 	}
 	if (skinnydebug & DEBUG_AUDIO) {
-		strncpy(ptr, "audio ", 6);
+		strcpy(ptr, "audio "); /* SAFE */
 		posn += 6;
 		ptr += 6;
 	}
 	if (skinnydebug & DEBUG_PACKET) {
-		strncpy(ptr, "packet ", 7);
+		strcpy(ptr, "packet "); /* SAFE */
 		posn += 7;
 		ptr += 7;
 	}
 	if (skinnydebug & DEBUG_LOCK) {
-		strncpy(ptr, "lock ", 5);
+		strcpy(ptr, "lock "); /* SAFE */
 		posn += 5;
 		ptr += 5;
 	}
 	if (skinnydebug & DEBUG_TEMPLATE) {
-		strncpy(ptr, "template ", 9);
+		strcpy(ptr, "template "); /* SAFE */
 		posn += 9;
 		ptr += 9;
 	}
 	if (skinnydebug & DEBUG_THREAD) {
-		strncpy(ptr, "thread ", 7);
+		strcpy(ptr, "thread "); /* SAFE */
 		posn += 7;
 		ptr += 7;
 	}
 	if (skinnydebug & DEBUG_HINT) {
-		strncpy(ptr, "hint ", 5);
+		strcpy(ptr, "hint "); /* SAFE */
 		posn += 5;
 		ptr += 5;
 	}
 	if (skinnydebug & DEBUG_KEEPALIVE) {
-		strncpy(ptr, "keepalive ", 10);
+		strcpy(ptr, "keepalive "); /* SAFE */
 		posn += 10;
 		ptr += 10;
 	}
@@ -4756,15 +4756,19 @@ static void start_rtp(struct skinny_subchannel *sub)
 {
 	struct skinny_line *l = sub->line;
 	struct skinny_device *d = l->device;
+#if 0
 	int hasvideo = 0;
+#endif
 	struct ast_sockaddr bindaddr_tmp;
 
 	skinny_locksub(sub);
 	SKINNY_DEBUG(DEBUG_AUDIO, 3, "Sub %u - Starting RTP\n", sub->callid);
 	ast_sockaddr_from_sin(&bindaddr_tmp, &bindaddr);
 	sub->rtp = ast_rtp_instance_new("asterisk", sched, &bindaddr_tmp, NULL);
+#if 0
 	if (hasvideo)
 		sub->vrtp = ast_rtp_instance_new("asterisk", sched, &bindaddr_tmp, NULL);
+#endif
 
 	if (sub->rtp) {
 		ast_rtp_instance_set_prop(sub->rtp, AST_RTP_PROPERTY_RTCP, 1);
@@ -4778,11 +4782,13 @@ static void start_rtp(struct skinny_subchannel *sub)
 		ast_channel_set_fd(sub->owner, 0, ast_rtp_instance_fd(sub->rtp, 0));
 		ast_channel_set_fd(sub->owner, 1, ast_rtp_instance_fd(sub->rtp, 1));
 	}
+#if 0
 	if (hasvideo && sub->vrtp && sub->owner) {
 		ast_rtp_instance_set_channel_id(sub->vrtp, ast_channel_uniqueid(sub->owner));
 		ast_channel_set_fd(sub->owner, 2, ast_rtp_instance_fd(sub->vrtp, 0));
 		ast_channel_set_fd(sub->owner, 3, ast_rtp_instance_fd(sub->vrtp, 1));
 	}
+#endif
 	if (sub->rtp) {
 		ast_rtp_instance_set_qos(sub->rtp, qos.tos_audio, qos.cos_audio, "Skinny RTP");
 		ast_rtp_instance_set_prop(sub->rtp, AST_RTP_PROPERTY_NAT, l->nat);
@@ -6424,7 +6430,6 @@ static int handle_stimulus_message(struct skinny_req *req, struct skinnysession 
 	case STIMULUS_CALLPARK:
 		{
 		char extout[AST_MAX_EXTENSION];
-		char message[32];
 		RAII_VAR(struct ast_bridge_channel *, bridge_channel, NULL, ao2_cleanup);
 		SKINNY_DEBUG(DEBUG_PACKET, 3, "Received STIMULUS_CALLPARK from %s, inst %d, callref %d\n",
 			d->name, instance, callreference);
@@ -6446,7 +6451,10 @@ static int handle_stimulus_message(struct skinny_req *req, struct skinnysession 
 			}
 
 			if (!ast_parking_park_call(bridge_channel, extout, sizeof(extout))) {
-				snprintf(message, sizeof(message), "Call Parked at: %s", extout);
+				static const char msg_prefix[] = "Call Parked at: ";
+				char message[sizeof(msg_prefix) + sizeof(extout)];
+
+				snprintf(message, sizeof(message), "%s%s", msg_prefix, extout);
 				transmit_displaynotify(d, message, 10);
 				break;
 			}
@@ -7177,7 +7185,6 @@ static int handle_soft_key_event_message(struct skinny_req *req, struct skinnyse
 	case SOFTKEY_PARK:
 		{
 		char extout[AST_MAX_EXTENSION];
-		char message[32];
 		RAII_VAR(struct ast_bridge_channel *, bridge_channel, NULL, ao2_cleanup);
 		SKINNY_DEBUG(DEBUG_PACKET, 3, "Received SOFTKEY_PARK from %s, inst %d, callref %d\n",
 			d->name, instance, callreference);
@@ -7199,7 +7206,10 @@ static int handle_soft_key_event_message(struct skinny_req *req, struct skinnyse
 			}
 
 			if (!ast_parking_park_call(bridge_channel, extout, sizeof(extout))) {
-				snprintf(message, sizeof(message), "Call Parked at: %s", extout);
+				static const char msg_prefix[] = "Call Parked at: ";
+				char message[sizeof(msg_prefix) + sizeof(extout)];
+
+				snprintf(message, sizeof(message), "%s%s", msg_prefix, extout);
 				transmit_displaynotify(d, message, 10);
 				break;
 			}
@@ -7429,6 +7439,11 @@ static void destroy_session(struct skinnysession *s)
 	}
 	ast_mutex_unlock(&s->lock);
 	ast_mutex_destroy(&s->lock);
+
+	if (s->t != AST_PTHREADT_NULL) {
+		pthread_detach(s->t);
+	}
+
 	ast_free(s);
 }
 
@@ -7514,11 +7529,6 @@ static void *skinny_session(void *data)
 	int dlen = 0;
 	int eventmessage = 0;
 	struct pollfd fds[1];
-
-	if (!s) {
-		ast_log(LOG_WARNING, "Bad Skinny Session\n");
-		return 0;
-	}
 
 	ast_log(LOG_NOTICE, "Starting Skinny session from %s\n", ast_inet_ntoa(s->sin.sin_addr));
 
@@ -7685,6 +7695,7 @@ static void *accept_thread(void *ignore)
 		s->keepalive_timeout_sched = -1;
 
 		if (ast_pthread_create(&s->t, NULL, skinny_session, s)) {
+			s->t = AST_PTHREADT_NULL;
 			destroy_session(s);
 		}
 	}
@@ -8319,6 +8330,8 @@ static struct skinny_line *config_line(const char *lname, struct ast_variable *v
 		mailbox_specific_topic = ast_mwi_topic(l->mailbox);
 		if (mailbox_specific_topic) {
 			l->mwi_event_sub = stasis_subscribe_pool(mailbox_specific_topic, mwi_event_cb, l);
+			stasis_subscription_accept_message_type(l->mwi_event_sub, ast_mwi_state_type());
+			stasis_subscription_set_filter(l->mwi_event_sub, STASIS_SUBSCRIPTION_FILTER_SELECTIVE);
 		}
 	}
 

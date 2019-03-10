@@ -169,6 +169,7 @@ struct ast_channel {
 	unsigned long insmpl;				/*!< Track the read/written samples for monitor use */
 	unsigned long outsmpl;				/*!< Track the read/written samples for monitor use */
 
+	int blocker_tid;					/*!< If anyone is blocking, this is their thread id */
 	int fds[AST_MAX_FDS];				/*!< File descriptors for channel -- Drivers will poll on
 							 *   these file descriptors, so at least one must be non -1.
 							 *   See \arg \ref AstFileDesc */
@@ -1331,6 +1332,15 @@ void ast_channel_blocker_set(struct ast_channel *chan, pthread_t value)
 	chan->blocker = value;
 }
 
+int ast_channel_blocker_tid(const struct ast_channel *chan)
+{
+	return chan->blocker_tid;
+}
+void ast_channel_blocker_tid_set(struct ast_channel *chan, int value)
+{
+	chan->blocker_tid = value;
+}
+
 ast_timing_func_t ast_channel_timingfunc(const struct ast_channel *chan)
 {
 	return chan->timingfunc;
@@ -1452,7 +1462,9 @@ struct ast_channel *__ast_channel_internal_alloc(void (*destructor)(void *obj), 
 		return ast_channel_unref(tmp);
 	}
 
-	if (!(tmp->dialed_causes = ao2_container_alloc(DIALED_CAUSES_BUCKETS, pvt_cause_hash_fn, pvt_cause_cmp_fn))) {
+	tmp->dialed_causes = ao2_container_alloc_hash(AO2_ALLOC_OPT_LOCK_MUTEX, 0,
+		DIALED_CAUSES_BUCKETS, pvt_cause_hash_fn, NULL, pvt_cause_cmp_fn);
+	if (!tmp->dialed_causes) {
 		return ast_channel_unref(tmp);
 	}
 
@@ -1532,6 +1544,18 @@ void ast_channel_internal_swap_topics(struct ast_channel *a, struct ast_channel 
 	temp = a->topics;
 	a->topics = b->topics;
 	b->topics = temp;
+}
+
+void ast_channel_internal_swap_endpoint_forward_and_endpoint_cache_forward(struct ast_channel *a, struct ast_channel *b)
+{
+	struct stasis_forward *temp;
+	temp = a->endpoint_forward;
+	a->endpoint_forward = b->endpoint_forward;
+	b->endpoint_forward = temp;
+
+	temp = a->endpoint_cache_forward;
+	a->endpoint_cache_forward = b->endpoint_cache_forward;
+	b->endpoint_cache_forward = temp;
 }
 
 void ast_channel_internal_set_fake_ids(struct ast_channel *chan, const char *uniqueid, const char *linkedid)

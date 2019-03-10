@@ -169,6 +169,9 @@ static int load_module(void)
 	if (!stasis_rtp_subscription) {
 		return AST_MODULE_LOAD_DECLINE;
 	}
+	stasis_subscription_accept_message_type(stasis_rtp_subscription, ast_rtp_rtcp_sent_type());
+	stasis_subscription_accept_message_type(stasis_rtp_subscription, ast_rtp_rtcp_received_type());
+	stasis_subscription_set_filter(stasis_rtp_subscription, STASIS_SUBSCRIPTION_FILTER_SELECTIVE);
 
 	return AST_MODULE_LOAD_SUCCESS;
 }
@@ -182,9 +185,8 @@ static int unload_module(void)
 	return 0;
 }
 
-AST_MODULE_INFO(ASTERISK_GPL_KEY, AST_MODFLAG_LOAD_ORDER, "RTCP HEPv3 Logger",
+AST_MODULE_INFO(ASTERISK_GPL_KEY, AST_MODFLAG_DEFAULT, "RTCP HEPv3 Logger",
 	.support_level = AST_MODULE_SUPPORT_EXTENDED,
 	.load = load_module,
 	.unload = unload_module,
-	.load_pri = AST_MODPRI_DEFAULT,
 	);

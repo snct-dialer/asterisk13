@@ -19,6 +19,11 @@
 #ifndef _RES_PJPROJECT_H
 #define _RES_PJPROJECT_H
 
+#include <pj/types.h>
+#include <pj/pool.h>
+
+struct ast_sockaddr;
+
 /*! \brief Determines whether the res_pjproject module is loaded */
 #define CHECK_PJPROJECT_MODULE_LOADED()                 \
 	do {                                                \
@@ -92,5 +97,52 @@ void ast_pjproject_ref(void);
  * This ensures graceful shutdown happens in the proper order.
  */
 void ast_pjproject_unref(void);
+
+/*!
+ * \brief Initialize the caching pool factory.
+ * \since 13.21.0
+ *
+ * \param cp Caching pool factory to initialize
+ * \param policy Pool factory policy
+ * \param max_capacity Total capacity to be retained in the cache.  Zero disables caching.
+ *
+ * \return Nothing
+ */
+void ast_pjproject_caching_pool_init(pj_caching_pool *cp,
+	const pj_pool_factory_policy *policy, pj_size_t max_capacity);
+
+/*!
+ * \brief Destroy caching pool factory and all cached pools.
+ * \since 13.21.0
+ *
+ * \param cp Caching pool factory to destroy
+ *
+ * \return Nothing
+ */
+void ast_pjproject_caching_pool_destroy(pj_caching_pool *cp);
+
+/*!
+ * \brief Fill a pj_sockaddr from an ast_sockaddr
+ * \since 13.24.0
+ *
+ * \param addr The source address to copy
+ * \param pjaddr The target address to receive the copied address
+ *
+ * \retval 0 Success
+ * \retval -1 Failure
+ */
+int ast_sockaddr_to_pj_sockaddr(const struct ast_sockaddr *addr, pj_sockaddr *pjaddr);
+
+/*!
+ * \brief Fill an ast_sockaddr from a pj_sockaddr
+ * \since 13.24.0
+ *
+ * \param addr The target address to receive the copied address
+ * \param pjaddr The source address to copy
+ *
+ * \retval 0 Success
+ * \retval -1 Failure
+ */
+int ast_sockaddr_from_pj_sockaddr(struct ast_sockaddr *addr, const pj_sockaddr *pjaddr);
 
 #endif /* _RES_PJPROJECT_H */

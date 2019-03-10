@@ -22,7 +22,7 @@
 /*! \file
  *
  * \brief ODBC resource manager
- * 
+ *
  * \author Mark Spencer <markster@digium.com>
  * \author Anthony Minessale II <anthmct@yahoo.com>
  * \author Tilghman Lesher <tilghman@digium.com>
@@ -34,7 +34,7 @@
  * \addtogroup configuration_file Configuration Files
  */
 
-/*! 
+/*!
  * \page res_odbc.conf res_odbc.conf
  * \verbinclude res_odbc.conf.sample
  */
@@ -42,7 +42,6 @@
 /*** MODULEINFO
 	<depend>generic_odbc</depend>
 	<depend>res_odbc_transaction</depend>
-	<depend>ltdl</depend>
 	<support_level>core</support_level>
  ***/
 
@@ -189,11 +188,6 @@ static void odbc_class_destructor(void *data)
 	SQLFreeHandle(SQL_HANDLE_ENV, class->env);
 	ast_mutex_destroy(&class->lock);
 	ast_cond_destroy(&class->cond);
-}
-
-static int null_hash_fn(const void *obj, const int flags)
-{
-	return 0;
 }
 
 static void odbc_obj_destructor(void *data)
@@ -444,23 +438,20 @@ struct ast_str *ast_odbc_print_errors(SQLSMALLINT handle_type, SQLHANDLE handle,
 {
 	struct ast_str *errors = ast_str_thread_get(&errors_buf, 16);
 	SQLINTEGER nativeerror = 0;
-	SQLINTEGER numfields = 0;
 	SQLSMALLINT diagbytes = 0;
 	SQLSMALLINT i;
 	unsigned char state[10];
 	unsigned char diagnostic[256];
 
 	ast_str_reset(errors);
-	SQLGetDiagField(handle_type, handle, 1, SQL_DIAG_NUMBER, &numfields,
-			SQL_IS_INTEGER, &diagbytes);
-	for (i = 0; i < numfields; i++) {
-		SQLGetDiagRec(handle_type, handle, i + 1, state, &nativeerror,
-				diagnostic, sizeof(diagnostic), &diagbytes);
+	i = 0;
+	while (SQLGetDiagRec(handle_type, handle, ++i, state, &nativeerror,
+		diagnostic, sizeof(diagnostic), &diagbytes) == SQL_SUCCESS) {
 		ast_str_append(&errors, 0, "%s%s", ast_str_strlen(errors) ? "," : "", state);
 		ast_log(LOG_WARNING, "%s returned an error: %s: %s\n", operation, state, diagnostic);
 		/* XXX Why is this here? */
 		if (i > 10) {
-			ast_log(LOG_WARNING, "Oh, that was good.  There are really %d diagnostics?\n", (int)numfields);
+			ast_log(LOG_WARNING, "There are more than 10 diagnostic records! Ignore the rest.\n");
 			break;
 		}
 	}
@@ -1068,26 +1059,16 @@ static int unload_module(void)
 	return -1;
 }
 
-/*!
- * \brief Load the module
- *
- * Module loading including tests for configuration or dependencies.
- * This function can return AST_MODULE_LOAD_FAILURE, AST_MODULE_LOAD_DECLINE,
- * or AST_MODULE_LOAD_SUCCESS. If a dependency or environment variable fails
- * tests return AST_MODULE_LOAD_FAILURE. If the module can not load the 
- * configuration file or other non-critical problem return 
- * AST_MODULE_LOAD_DECLINE. On success return AST_MODULE_LOAD_SUCCESS.
- */
 static int load_module(void)
 {
-	if (!(class_container = ao2_container_alloc(1, null_hash_fn, ao2_match_by_addr)))
+	class_container = ao2_container_alloc_list(AO2_ALLOC_OPT_LOCK_MUTEX, 0, NULL, ao2_match_by_addr);
+	if (!class_container)
 		return AST_MODULE_LOAD_DECLINE;
 	if (load_odbc_config() == -1)
 		return AST_MODULE_LOAD_DECLINE;
 	ast_cli_register_multiple(cli_odbc, ARRAY_LEN(cli_odbc));
 	ast_data_register_multiple(odbc_providers, ARRAY_LEN(odbc_providers));
-	ast_log(LOG_NOTICE, "res_odbc loaded.\n");
-	return 0;
+	return AST_MODULE_LOAD_SUCCESS;
 }
 
 AST_MODULE_INFO(ASTERISK_GPL_KEY, AST_MODFLAG_GLOBAL_SYMBOLS | AST_MODFLAG_LOAD_ORDER, "ODBC resource",

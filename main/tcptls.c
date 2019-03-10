@@ -25,32 +25,52 @@
  * \author Brett Bryant <brettbryant@gmail.com>
  */
 
-/*** MODULEINFO
-	<support_level>core</support_level>
- ***/
-
 #include "asterisk.h"
 
 ASTERISK_FILE_VERSION(__FILE__, "$Revision$")
 
+#include "asterisk/tcptls.h"            /* for ast_tls_config, ast_tcptls_se... */
+
 #ifdef HAVE_FCNTL_H
-#include <fcntl.h>
-#endif
+#include <fcntl.h>                      /* for O_NONBLOCK */
+#endif /* HAVE_FCNTL_H */
+#include <netinet/in.h>                 /* for IPPROTO_TCP */
+#ifdef DO_SSL
+#include <openssl/asn1.h>               /* for ASN1_STRING_to_UTF8 */
+#include <openssl/crypto.h>             /* for OPENSSL_free */
+#include <openssl/err.h>                /* for ERR_error_string */
+#include <openssl/opensslconf.h>        /* for OPENSSL_NO_SSL3_METHOD, OPENS... */
+#include <openssl/opensslv.h>           /* for OPENSSL_VERSION_NUMBER */
+#include <openssl/safestack.h>          /* for STACK_OF */
+#include <openssl/ssl.h>                /* for SSL_CTX_free, SSL_get_error, ... */
+#include <openssl/x509.h>               /* for X509_free, X509_NAME_ENTRY_ge... */
+#include <openssl/x509v3.h>             /* for GENERAL_NAME, sk_GENERAL_NAME... */
+#ifndef OPENSSL_NO_DH
+#include <openssl/bio.h>                /* for BIO_free, BIO_new_file */
+#include <openssl/dh.h>                 /* for DH_free */
+#include <openssl/pem.h>                /* for PEM_read_bio_DHparams */
+#endif /* OPENSSL_NO_DH */
+#ifndef OPENSSL_NO_EC
+#include <openssl/ec.h>                 /* for EC_KEY_free, EC_KEY_new_by_cu... */
+#endif /* OPENSSL_NO_EC */
+#endif /* DO_SSL */
+#include <pthread.h>                    /* for pthread_cancel, pthread_join */
+#include <signal.h>                     /* for pthread_kill, SIGURG */
+#include <sys/socket.h>                 /* for setsockopt, shutdown, socket */
+#include <sys/stat.h>                   /* for stat */
+#include <sys/time.h>                   /* for timeval */
 
-#include <signal.h>
-#include <sys/signal.h>
-#include <sys/stat.h>
-
-#include "asterisk/compat.h"
-#include "asterisk/tcptls.h"
-#include "asterisk/http.h"
-#include "asterisk/utils.h"
-#include "asterisk/strings.h"
-#include "asterisk/options.h"
-#include "asterisk/manager.h"
-#include "asterisk/astobj2.h"
-#include "asterisk/pbx.h"
-#include "asterisk/app.h"
+#include "asterisk/app.h"               /* for ast_read_textfile */
+#include "asterisk/astobj2.h"           /* for ao2_ref, ao2_t_ref, ao2_alloc */
+#include "asterisk/compat.h"            /* for strcasecmp */
+#include "asterisk/config.h"            /* for ast_parse_arg, ast_parse_flag... */
+#include "asterisk/lock.h"              /* for AST_PTHREADT_NULL */
+#include "asterisk/logger.h"            /* for ast_log, LOG_ERROR, ast_debug */
+#include "asterisk/netsock2.h"          /* for ast_sockaddr_copy, ast_sockad... */
+#include "asterisk/pbx.h"               /* for ast_thread_inhibit_escalations */
+#include "asterisk/threadstorage.h"     /* for ast_threadstorage_get, AST_TH... */
+#include "asterisk/time.h"              /* for ast_remaining_ms, ast_tvnow */
+#include "asterisk/utils.h"             /* for ast_true, ast_free, ast_wait_... */
 
 /*! ao2 object used for the FILE stream fopencookie()/funopen() cookie. */
 struct ast_tcptls_stream {
@@ -447,14 +467,14 @@ static int tcptls_stream_close(void *cookie)
 					ERR_error_string(sslerr, err), ssl_error_to_string(sslerr, res));
 			}
 
-#if defined(OPENSSL_VERSION_NUMBER) && OPENSSL_VERSION_NUMBER >= 0x10100000L && !defined(LIBRESSL_VERSION_NUMBER)
+#if !defined(LIBRESSL_VERSION_NUMBER) && (OPENSSL_VERSION_NUMBER >= 0x10100000L)
 			if (!SSL_is_server(stream->ssl)) {
 #else
 			if (!stream->ssl->server) {
 #endif
 				/* For client threads, ensure that the error stack is cleared */
-#if !defined(OPENSSL_VERSION_NUMBER) || OPENSSL_VERSION_NUMBER < 0x10100000L || defined(LIBRESSL_VERSION_NUMBER)
-#if defined(OPENSSL_VERSION_NUMBER) && OPENSSL_VERSION_NUMBER >= 0x10000000L
+#if defined(LIBRESSL_VERSION_NUMBER) || (OPENSSL_VERSION_NUMBER < 0x10100000L)
+#if OPENSSL_VERSION_NUMBER >= 0x10000000L
 				ERR_remove_thread_state(NULL);
 #else
 				ERR_remove_state(0);
@@ -636,7 +656,6 @@ static int check_tcptls_cert_name(ASN1_STRING *cert_str, const char *hostname, c
 
 	return ret;
 }
-
 #endif
 
 /*! \brief
@@ -661,6 +680,19 @@ static void *handle_tcptls_connection(void *data)
 	 */
 	if (ast_thread_inhibit_escalations()) {
 		ast_log(LOG_ERROR, "Failed to inhibit privilege escalations; killing connection\n");
+		ast_tcptls_close_session_file(tcptls_session);
+		ao2_ref(tcptls_session, -1);
+		return NULL;
+	}
+
+	/*
+	 * TCP/TLS connections are associated with external protocols which can
+	 * be considered to be user interfaces (even for SIP messages), and
+	 * will not handle channel media.  This may need to be pushed down into
+	 * the individual protocol handlers, but this seems like a good start.
+	 */
+	if (ast_thread_user_interface_set(1)) {
+		ast_log(LOG_ERROR, "Failed to set user interface status; killing connection\n");
 		ast_tcptls_close_session_file(tcptls_session);
 		ao2_ref(tcptls_session, -1);
 		return NULL;
@@ -805,7 +837,7 @@ void *ast_tcptls_server_root(void *data)
 	pthread_t launched;
 
 	for (;;) {
-		int i, flags;
+		int i;
 
 		if (desc->periodic_fn) {
 			desc->periodic_fn(desc);
@@ -843,8 +875,7 @@ void *ast_tcptls_server_root(void *data)
 			close(fd);
 			continue;
 		}
-		flags = fcntl(fd, F_GETFL);
-		fcntl(fd, F_SETFL, flags & ~O_NONBLOCK);
+		ast_fd_clear_flags(fd, O_NONBLOCK);
 		tcptls_session->fd = fd;
 		tcptls_session->parent = desc;
 		ast_sockaddr_copy(&tcptls_session->remote_address, &addr);
@@ -874,7 +905,10 @@ void *ast_tcptls_server_root(void *data)
 static int __ssl_setup(struct ast_tls_config *cfg, int client)
 {
 #ifndef DO_SSL
-	cfg->enabled = 0;
+	if (cfg->enabled) {
+		ast_log(LOG_NOTICE, "Configured without OpenSSL Development Headers");
+		cfg->enabled = 0;
+	}
 	return 0;
 #else
 	int disable_ssl = 0;
@@ -899,13 +933,13 @@ static int __ssl_setup(struct ast_tls_config *cfg, int client)
 			cfg->ssl_ctx = SSL_CTX_new(SSLv2_client_method());
 		} else
 #endif
-#ifndef OPENSSL_NO_SSL3_METHOD
+#if !defined(OPENSSL_NO_SSL3_METHOD) && !(defined(OPENSSL_API_COMPAT) && (OPENSSL_API_COMPAT >= 0x10100000L))
 		if (ast_test_flag(&cfg->flags, AST_SSL_SSLV3_CLIENT)) {
 			ast_log(LOG_WARNING, "Usage of SSLv3 is discouraged due to known vulnerabilities. Please use 'tlsv1' or leave the TLS method unspecified!\n");
 			cfg->ssl_ctx = SSL_CTX_new(SSLv3_client_method());
 		} else
 #endif
-#if defined(OPENSSL_VERSION_NUMBER) && (OPENSSL_VERSION_NUMBER  >= 0x10100000L)
+#if OPENSSL_VERSION_NUMBER >= 0x10100000L
 		cfg->ssl_ctx = SSL_CTX_new(TLS_client_method());
 #else
 		if (ast_test_flag(&cfg->flags, AST_SSL_TLSV1_CLIENT)) {
@@ -941,7 +975,7 @@ static int __ssl_setup(struct ast_tls_config *cfg, int client)
 	if (ast_test_flag(&cfg->flags, AST_SSL_DISABLE_TLSV1)) {
 		ssl_opts |= SSL_OP_NO_TLSv1;
 	}
-#if defined(HAVE_SSL_OP_NO_TLSV1_1) && defined(HAVE_SSL_OP_NO_TLSV1_2)
+#if defined(SSL_OP_NO_TLSv1_1) && defined(SSL_OP_NO_TLSv1_2)
 	if (ast_test_flag(&cfg->flags, AST_SSL_DISABLE_TLSV11)) {
 		ssl_opts |= SSL_OP_NO_TLSv1_1;
 	}
@@ -999,8 +1033,7 @@ static int __ssl_setup(struct ast_tls_config *cfg, int client)
 		}
 	}
 
-#ifdef HAVE_OPENSSL_EC
-
+#ifndef OPENSSL_NO_DH
 	if (!ast_strlen_zero(cfg->pvtfile)) {
 		BIO *bio = BIO_new_file(cfg->pvtfile, "r");
 		if (bio != NULL) {
@@ -1016,12 +1049,15 @@ static int __ssl_setup(struct ast_tls_config *cfg, int client)
 			BIO_free(bio);
 		}
 	}
+#endif
+
 	#ifndef SSL_CTRL_SET_ECDH_AUTO
 		#define SSL_CTRL_SET_ECDH_AUTO 94
 	#endif
 	/* SSL_CTX_set_ecdh_auto(cfg->ssl_ctx, on); requires OpenSSL 1.0.2 which wraps: */
 	if (SSL_CTX_ctrl(cfg->ssl_ctx, SSL_CTRL_SET_ECDH_AUTO, 1, NULL)) {
 		ast_verb(2, "TLS/SSL ECDH initialized (automatic), faster PFS ciphers enabled\n");
+#if !defined(OPENSSL_NO_ECDH) && (OPENSSL_VERSION_NUMBER >= 0x10000000L) && (OPENSSL_VERSION_NUMBER < 0x10100000L)
 	} else {
 		/* enables AES-128 ciphers, to get AES-256 use NID_secp384r1 */
 		EC_KEY *ecdh = EC_KEY_new_by_curve_name(NID_X9_62_prime256v1);
@@ -1031,9 +1067,8 @@ static int __ssl_setup(struct ast_tls_config *cfg, int client)
 			}
 			EC_KEY_free(ecdh);
 		}
+#endif
 	}
-
-#endif /* #ifdef HAVE_OPENSSL_EC */
 
 	ast_verb(2, "TLS/SSL certificate ok\n");	/* We should log which one that is ok. This message doesn't really make sense in production use */
 	return 1;
@@ -1048,7 +1083,7 @@ int ast_ssl_setup(struct ast_tls_config *cfg)
 void ast_ssl_teardown(struct ast_tls_config *cfg)
 {
 #ifdef DO_SSL
-	if (cfg->ssl_ctx) {
+	if (cfg && cfg->ssl_ctx) {
 		SSL_CTX_free(cfg->ssl_ctx);
 		cfg->ssl_ctx = NULL;
 	}
@@ -1058,7 +1093,6 @@ void ast_ssl_teardown(struct ast_tls_config *cfg)
 struct ast_tcptls_session_instance *ast_tcptls_client_start(struct ast_tcptls_session_instance *tcptls_session)
 {
 	struct ast_tcptls_session_args *desc;
-	int flags;
 
 	if (!(desc = tcptls_session->parent)) {
 		goto client_start_error;
@@ -1072,8 +1106,7 @@ struct ast_tcptls_session_instance *ast_tcptls_client_start(struct ast_tcptls_se
 		goto client_start_error;
 	}
 
-	flags = fcntl(desc->accept_fd, F_GETFL);
-	fcntl(desc->accept_fd, F_SETFL, flags & ~O_NONBLOCK);
+	ast_fd_clear_flags(desc->accept_fd, O_NONBLOCK);
 
 	if (desc->tls_cfg) {
 		desc->tls_cfg->enabled = 1;
@@ -1120,7 +1153,8 @@ struct ast_tcptls_session_instance *ast_tcptls_client_create(struct ast_tcptls_s
 
 	/* if a local address was specified, bind to it so the connection will
 	   originate from the desired address */
-	if (!ast_sockaddr_isnull(&desc->local_address)) {
+	if (!ast_sockaddr_isnull(&desc->local_address) &&
+	    !ast_sockaddr_is_any(&desc->local_address)) {
 		setsockopt(desc->accept_fd, SOL_SOCKET, SO_REUSEADDR, &x, sizeof(x));
 		if (ast_bind(desc->accept_fd, &desc->local_address)) {
 			ast_log(LOG_ERROR, "Unable to bind %s to %s: %s\n",
@@ -1160,7 +1194,6 @@ error:
 
 void ast_tcptls_server_start(struct ast_tcptls_session_args *desc)
 {
-	int flags;
 	int x = 1;
 	int tls_changed = 0;
 
@@ -1244,7 +1277,7 @@ void ast_tcptls_server_start(struct ast_tcptls_session_args *desc)
 		return;
 	}
 
-	desc->accept_fd = socket(ast_sockaddr_is_ipv6(&desc->local_address) ?
+	desc->accept_fd = ast_socket_nonblock(ast_sockaddr_is_ipv6(&desc->local_address) ?
 				 AF_INET6 : AF_INET, SOCK_STREAM, 0);
 	if (desc->accept_fd < 0) {
 		ast_log(LOG_ERROR, "Unable to allocate socket for %s: %s\n", desc->name, strerror(errno));
@@ -1263,8 +1296,6 @@ void ast_tcptls_server_start(struct ast_tcptls_session_args *desc)
 		ast_log(LOG_ERROR, "Unable to listen for %s!\n", desc->name);
 		goto error;
 	}
-	flags = fcntl(desc->accept_fd, F_GETFL);
-	fcntl(desc->accept_fd, F_SETFL, flags | O_NONBLOCK);
 	if (ast_pthread_create_background(&desc->master, NULL, desc->accept_fn, desc)) {
 		ast_log(LOG_ERROR, "Unable to launch thread for %s on %s: %s\n",
 			desc->name,
