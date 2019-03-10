@@ -124,7 +124,7 @@ override_dh_gencontrol:
 		dh_gencontrol -- -Vasterisk:ABI=$$AST_BUILDOPT_SUM
 
 SUBPACKS_EXTRA = \
-		 voicemail voicemail-odbcstorage voicemail-imapstorage \
+		 voicemail \
 		 ooh323 mysql mp3
 ifeq (linux,$(BUILD_OS))
 SUBPACKS_EXTRA += dahdi mobile tests vpb
@@ -155,10 +155,10 @@ override_dh_install-arch:
 		    && rm -f $$extra_packs
 
 	# Rename dh_install file for -imapstorage and -odbcstorage.
-	mv $(CURDIR)/debian/asterisk-voicemail-imapstorage/usr/lib/asterisk/modules/app_voicemail_imapstorage.so \
-		$(CURDIR)/debian/asterisk-voicemail-imapstorage/usr/lib/asterisk/modules/app_voicemail.so
-	mv $(CURDIR)/debian/asterisk-voicemail-odbcstorage/usr/lib/asterisk/modules/app_voicemail_odbcstorage.so \
-		$(CURDIR)/debian/asterisk-voicemail-odbcstorage/usr/lib/asterisk/modules/app_voicemail.so
+	#mv $(CURDIR)/debian/asterisk-voicemail-imapstorage/usr/lib/asterisk/modules/app_voicemail_imapstorage.so \
+	#	$(CURDIR)/debian/asterisk-voicemail-imapstorage/usr/lib/asterisk/modules/app_voicemail.so
+	#mv $(CURDIR)/debian/asterisk-voicemail-odbcstorage/usr/lib/asterisk/modules/app_voicemail_odbcstorage.so \
+	#	$(CURDIR)/debian/asterisk-voicemail-odbcstorage/usr/lib/asterisk/modules/app_voicemail.so
 
 override_dh_fixperms:
 	dh_fixperms

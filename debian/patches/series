@@ -1,5 +1,5 @@
 # upstream fixes
-hack-multiple-app-voicemail
+#hack-multiple-app-voicemail
 # Not used ATM. See comment in patch:
 #make-clean-fixes
 #
@@ -13,7 +13,7 @@ sound_files
 #h323-extra-target
 mpglib
 enable_addons
-no_uname
+#no_uname
 
 ilbc_disable
 astdatadir
@@ -32,10 +32,10 @@ amr.patch
 ffmpeg-detection.patch
 ffmpeg-includes.patch
 
-radcli-detection.patch
+##radcli-detection.patch
 
-pjsip_unresolved_symbol.patch
+##pjsip_unresolved_symbol.patch
 build-reproducibly
 0100-Enable-meetme.patch
-0105-libsrtp-2.1.x.patch
+#0105-libsrtp-2.1.x.patch
 0110-vicidial.patch

@@ -2,7 +2,7 @@ Index: trunk/configure.ac
 ===================================================================
 --- trunk.orig/configure.ac
 +++ trunk/configure.ac
-@@ -56,7 +56,7 @@ AC_SUBST([astdbdir],          ['${astvar
+@@ -45,7 +45,7 @@ AC_SUBST([astdbdir],          ['${astvar
  AC_SUBST([astkeydir],         ['${astvarlibdir}'])dnl
  AC_SUBST([astspooldir],       ['${localstatedir}/spool/asterisk'])dnl
  AC_SUBST([astlogdir],         ['${localstatedir}/log/asterisk'])dnl
