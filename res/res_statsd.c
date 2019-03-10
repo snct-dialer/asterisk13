@@ -233,8 +233,8 @@ static struct aco_type global_option = {
 	.type = ACO_GLOBAL,
 	.name = "global",
 	.item_offset = offsetof(struct conf, global),
-	.category = "^general$",
-	.category_match = ACO_WHITELIST
+	.category = "general",
+	.category_match = ACO_WHITELIST_EXACT,
 };
 
 static struct aco_type *global_options[] = ACO_TYPES(&global_option);
@@ -318,6 +318,14 @@ static void statsd_shutdown(void)
 	}
 }
 
+static int unload_module(void)
+{
+	statsd_shutdown();
+	aco_info_destroy(&cfg_info);
+	ao2_global_obj_release(confs);
+	return 0;
+}
+
 static int load_module(void)
 {
 	if (aco_info_init(&cfg_info)) {
@@ -350,34 +358,37 @@ static int load_module(void)
 		return AST_MODULE_LOAD_SUCCESS;
 	}
 
-	if (statsd_init() != 0) {
-		aco_info_destroy(&cfg_info);
+	if (statsd_init()) {
+		unload_module();
 		return AST_MODULE_LOAD_DECLINE;
 	}
+
+	/* For Optional API. */
+	ast_module_shutdown_ref(ast_module_info->self);
 
 	return AST_MODULE_LOAD_SUCCESS;
 }
 
-static int unload_module(void)
-{
-	statsd_shutdown();
-	aco_info_destroy(&cfg_info);
-	ao2_global_obj_release(confs);
-	return 0;
-}
-
 static int reload_module(void)
 {
-	if (aco_process_config(&cfg_info, 1)) {
+	switch (aco_process_config(&cfg_info, 1)) {
+	case ACO_PROCESS_OK:
+		break;
+	case ACO_PROCESS_UNCHANGED:
+		return AST_MODULE_LOAD_SUCCESS;
+	case ACO_PROCESS_ERROR:
+	default:
 		return AST_MODULE_LOAD_DECLINE;
 	}
 
 	if (is_enabled()) {
-		return statsd_init();
+		if (statsd_init()) {
+			return AST_MODULE_LOAD_DECLINE;
+		}
 	} else {
 		statsd_shutdown();
-		return AST_MODULE_LOAD_SUCCESS;
 	}
+	return AST_MODULE_LOAD_SUCCESS;
 }
 
 /* The priority of this module is set to be as low as possible, since it could

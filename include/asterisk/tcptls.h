@@ -26,7 +26,7 @@
  *
  * TLS/SSL support is basically implemented by reading from a config file
  * (currently manager.conf, http.conf and sip.conf) the names of the certificate
- * files and cipher to use, and then run ssl_setup() to create an appropriate 
+ * files and cipher to use, and then run ssl_setup() to create an appropriate
  * data structure named ssl_ctx.
  *
  * If we support multiple domains, presumably we need to read multiple
@@ -44,33 +44,29 @@
  * and their setup should be moved to a more central place, e.g. asterisk.conf
  * and the source files that processes it. Similarly, ssl_setup() should
  * be run earlier in the startup process so modules have it available.
- * 
+ *
  * \ref AstTlsOverview
- *
- * \todo For SIP, the SubjectAltNames should be checked on verification
- *       of the certificate. (Check RFC 5922)
- *
  */
 
 #ifndef _ASTERISK_TCPTLS_H
 #define _ASTERISK_TCPTLS_H
 
-#include "asterisk/netsock2.h"
-#include "asterisk/utils.h"
+#include "asterisk.h"
+
+#include <pthread.h>            /* for pthread_t */
+
+#include "asterisk/netsock2.h"  /* for ast_sockaddr */
+#include "asterisk/utils.h"     /* for ast_flags */
+
+struct ssl_st;                  /* forward declaration */
+struct ssl_ctx_st;              /* forward declaration */
+struct timeval;                 /* forward declaration */
+typedef struct ssl_st SSL;
+typedef struct ssl_ctx_st SSL_CTX;
 
 #if defined(HAVE_OPENSSL) && (defined(HAVE_FUNOPEN) || defined(HAVE_FOPENCOOKIE))
 #define DO_SSL  /* comment in/out if you want to support ssl */
 #endif
-
-#ifdef DO_SSL
-#include <openssl/ssl.h>
-#include <openssl/err.h>
-#include <openssl/x509v3.h>
-#else
-/* declare dummy types so we can define a pointer to them */
-typedef struct {} SSL;
-typedef struct {} SSL_CTX;
-#endif /* DO_SSL */
 
 /*! SSL support */
 #define AST_CERTFILE "asterisk.pem"
@@ -246,7 +242,7 @@ struct ast_tcptls_session_instance {
 #define LEN_T size_t
 #endif
 
-/*! 
+/*!
   * \brief attempts to connect and start tcptls session, on error the tcptls_session's
   * ref count is decremented, fd and file are closed, and NULL is returned.
   */

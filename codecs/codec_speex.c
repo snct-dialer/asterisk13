@@ -21,7 +21,7 @@
  *
  * \brief Translate between signed linear and Speex (Open Codec)
  *
- * \note This work was motivated by Jeremy McNamara 
+ * \note This work was motivated by Jeremy McNamara
  * hacked to be configurable by anthm and bkw 9/28/2004
  *
  * \ingroup codecs
@@ -45,7 +45,7 @@ ASTERISK_FILE_VERSION(__FILE__, "$Revision$")
 
 /* We require a post 1.1.8 version of Speex to enable preprocessing
  * and better type handling
- */   
+ */
 #ifdef _SPEEX_TYPES_H
 #include <speex/speex_preprocess.h>
 #endif
@@ -136,7 +136,7 @@ static int speex_encoder_construct(struct ast_trans_pvt *pvt, const SpeexMode *p
 	if (abr)
 		speex_encoder_ctl(tmp->speex, SPEEX_SET_ABR, &abr);
 	if (dtx)
-		speex_encoder_ctl(tmp->speex, SPEEX_SET_DTX, &dtx); 
+		speex_encoder_ctl(tmp->speex, SPEEX_SET_DTX, &dtx);
 	tmp->silent_state = 0;
 
 	return 0;
@@ -160,7 +160,7 @@ static int lin32tospeexuwb_new(struct ast_trans_pvt *pvt)
 static int speex_decoder_construct(struct ast_trans_pvt *pvt, const SpeexMode *profile)
 {
 	struct speex_coder_pvt *tmp = pvt->pvt;
-	
+
 	if (!(tmp->speex = speex_decoder_init(profile)))
 		return -1;
 
@@ -387,7 +387,7 @@ static struct ast_translator speextolin = {
 };
 
 static struct ast_translator lintospeex = {
-	.name = "lintospeex", 
+	.name = "lintospeex",
 	.src_codec = {
 		.name = "slin",
 		.type = AST_MEDIA_TYPE_AUDIO,
@@ -420,7 +420,7 @@ static struct ast_translator speexwbtolin16 = {
 		.name = "slin",
 		.type = AST_MEDIA_TYPE_AUDIO,
 		.sample_rate = 16000,
-	}, 
+	},
 	.format = "slin16",
 	.newpvt = speexwbtolin16_new,
 	.framein = speextolin_framein,
@@ -499,7 +499,7 @@ static struct ast_translator lin32tospeexuwb = {
 	.buf_size = BUFFER_SAMPLES * 2, /* XXX maybe a lot less ? */
 };
 
-static int parse_config(int reload) 
+static int parse_config(int reload)
 {
 	struct ast_flags config_flags = { reload ? CONFIG_FLAG_FILEUNCHANGED : 0 };
 	struct ast_config *cfg = ast_config_load("codecs.conf", config_flags);
@@ -516,14 +516,14 @@ static int parse_config(int reload)
 			if (res > -1 && res < 11) {
 				ast_verb(3, "CODEC SPEEX: Setting Quality to %d\n",res);
 				quality = res;
-			} else 
+			} else
 				ast_log(LOG_ERROR,"Error Quality must be 0-10\n");
 		} else if (!strcasecmp(var->name, "complexity")) {
 			res = abs(atoi(var->value));
 			if (res > -1 && res < 11) {
 				ast_verb(3, "CODEC SPEEX: Setting Complexity to %d\n",res);
 				complexity = res;
-			} else 
+			} else
 				ast_log(LOG_ERROR,"Error! Complexity must be 0-10\n");
 		} else if (!strcasecmp(var->name, "vbr_quality")) {
 			if (sscanf(var->value, "%30f", &res_f) == 1 && res_f >= 0 && res_f <= 10) {
@@ -547,7 +547,7 @@ static int parse_config(int reload)
 					else
 					ast_verb(3, "CODEC SPEEX: Disabling ABR\n");
 				abr = res;
-			} else 
+			} else
 				ast_log(LOG_ERROR,"Error! ABR target bitrate must be >= 0\n");
 		} else if (!strcasecmp(var->name, "vad")) {
 			vad = ast_true(var->value) ? 1 : 0;
@@ -594,7 +594,7 @@ static int parse_config(int reload)
 	return 0;
 }
 
-static int reload(void) 
+static int reload(void)
 {
 	if (parse_config(1))
 		return AST_MODULE_LOAD_DECLINE;
@@ -603,39 +603,37 @@ static int reload(void)
 
 static int unload_module(void)
 {
-	int res = 0;
+	ast_unregister_translator(&speextolin);
+	ast_unregister_translator(&lintospeex);
+	ast_unregister_translator(&speexwbtolin16);
+	ast_unregister_translator(&lin16tospeexwb);
+	ast_unregister_translator(&speexuwbtolin32);
+	ast_unregister_translator(&lin32tospeexuwb);
 
-	res |= ast_unregister_translator(&speextolin);
-	res |= ast_unregister_translator(&lintospeex);
-	res |= ast_unregister_translator(&speexwbtolin16);
-	res |= ast_unregister_translator(&lin16tospeexwb);
-	res |= ast_unregister_translator(&speexuwbtolin32);
-	res |= ast_unregister_translator(&lin32tospeexuwb);
-
-
-	return res;
+	return 0;
 }
 
 static int load_module(void)
 {
 	int res = 0;
 
-	if (parse_config(0))
+	if (parse_config(0)) {
 		return AST_MODULE_LOAD_DECLINE;
+	}
 
+	/* XXX It is most likely a bug in this module if we fail to register a translator */
 	res |= ast_register_translator(&speextolin);
 	res |= ast_register_translator(&lintospeex);
 	res |= ast_register_translator(&speexwbtolin16);
 	res |= ast_register_translator(&lin16tospeexwb);
 	res |= ast_register_translator(&speexuwbtolin32);
 	res |= ast_register_translator(&lin32tospeexuwb);
-
 	if (res) {
 		unload_module();
-		return res;
+		return AST_MODULE_LOAD_DECLINE;
 	}
 
-	return res;
+	return AST_MODULE_LOAD_SUCCESS;
 }
 
 AST_MODULE_INFO(ASTERISK_GPL_KEY, AST_MODFLAG_DEFAULT, "Speex Coder/Decoder",

@@ -396,59 +396,6 @@ static int handle_negotiated_sdp(struct ast_sip_session *session, const pjmedia_
 	return -1;
 }
 
-AST_RWLIST_HEAD_STATIC(session_supplements, ast_sip_session_supplement);
-
-int ast_sip_session_register_supplement(struct ast_sip_session_supplement *supplement)
-{
-	struct ast_sip_session_supplement *iter;
-	int inserted = 0;
-	SCOPED_LOCK(lock, &session_supplements, AST_RWLIST_WRLOCK, AST_RWLIST_UNLOCK);
-
-	if (!supplement->response_priority) {
-		supplement->response_priority = AST_SIP_SESSION_BEFORE_MEDIA;
-	}
-
-	AST_RWLIST_TRAVERSE_SAFE_BEGIN(&session_supplements, iter, next) {
-		if (iter->priority > supplement->priority) {
-			AST_RWLIST_INSERT_BEFORE_CURRENT(supplement, next);
-			inserted = 1;
-			break;
-		}
-	}
-	AST_RWLIST_TRAVERSE_SAFE_END;
-
-	if (!inserted) {
-		AST_RWLIST_INSERT_TAIL(&session_supplements, supplement, next);
-	}
-	ast_module_ref(ast_module_info->self);
-	return 0;
-}
-
-void ast_sip_session_unregister_supplement(struct ast_sip_session_supplement *supplement)
-{
-	struct ast_sip_session_supplement *iter;
-	SCOPED_LOCK(lock, &session_supplements, AST_RWLIST_WRLOCK, AST_RWLIST_UNLOCK);
-	AST_RWLIST_TRAVERSE_SAFE_BEGIN(&session_supplements, iter, next) {
-		if (supplement == iter) {
-			AST_RWLIST_REMOVE_CURRENT(next);
-			ast_module_unref(ast_module_info->self);
-			break;
-		}
-	}
-	AST_RWLIST_TRAVERSE_SAFE_END;
-}
-
-static struct ast_sip_session_supplement *supplement_dup(const struct ast_sip_session_supplement *src)
-{
-	struct ast_sip_session_supplement *dst = ast_calloc(1, sizeof(*dst));
-	if (!dst) {
-		return NULL;
-	}
-	/* Will need to revisit if shallow copy becomes an issue */
-	*dst = *src;
-	return dst;
-}
-
 #define DATASTORE_BUCKETS 53
 #define MEDIA_BUCKETS 7
 
@@ -526,7 +473,7 @@ enum delayed_method {
 
 /*!
  * \internal
- * \brief Convert delayed method enum value to to a string.
+ * \brief Convert delayed method enum value to a string.
  * \since 13.3.0
  *
  * \param method Delayed method enum value to convert to a string.
@@ -814,8 +761,10 @@ static void set_from_header(struct ast_sip_session *session)
 	struct ast_party_id connected_id;
 	pj_pool_t *dlg_pool;
 	pjsip_fromto_hdr *dlg_info;
+	pjsip_contact_hdr *dlg_contact;
 	pjsip_name_addr *dlg_info_name_addr;
 	pjsip_sip_uri *dlg_info_uri;
+	pjsip_sip_uri *dlg_contact_uri;
 	int restricted;
 
 	if (!session->channel || session->saved_from_hdr) {
@@ -836,11 +785,16 @@ static void set_from_header(struct ast_sip_session *session)
 
 	dlg_pool = session->inv_session->dlg->pool;
 	dlg_info = session->inv_session->dlg->local.info;
+	dlg_contact = session->inv_session->dlg->local.contact;
 	dlg_info_name_addr = (pjsip_name_addr *) dlg_info->uri;
 	dlg_info_uri = pjsip_uri_get_uri(dlg_info_name_addr);
+	dlg_contact_uri = (pjsip_sip_uri*)pjsip_uri_get_uri(dlg_contact->uri);
 
 	if (session->endpoint->id.trust_outbound || !restricted) {
 		ast_sip_modify_id_header(dlg_pool, dlg_info, &connected_id);
+		if (ast_sip_get_use_callerid_contact() && ast_strlen_zero(session->endpoint->contact_user)) {
+			pj_strdup2(dlg_pool, &dlg_contact_uri->user, S_COR(connected_id.number.valid, connected_id.number.str, ""));
+		}
 	}
 
 	ast_party_id_free(&connected_id);
@@ -855,10 +809,9 @@ static void set_from_header(struct ast_sip_session *session)
 		pj_strdup2(dlg_pool, &dlg_info_uri->host, session->endpoint->fromdomain);
 	}
 
-	ast_sip_add_usereqphone(session->endpoint, dlg_pool, dlg_info->uri);
-
 	/* We need to save off the non-anonymized From for RPID/PAI generation (for domain) */
 	session->saved_from_hdr = pjsip_hdr_clone(dlg_pool, dlg_info);
+	ast_sip_add_usereqphone(session->endpoint, dlg_pool, session->saved_from_hdr->uri);
 
 	/* In chan_sip, fromuser and fromdomain trump restricted so we only
 	 * anonymize if they're not set.
@@ -871,10 +824,16 @@ static void set_from_header(struct ast_sip_session *session)
 			pj_strdup2(dlg_pool, &dlg_info_uri->user, "anonymous");
 		}
 
+		if (ast_sip_get_use_callerid_contact() && ast_strlen_zero(session->endpoint->contact_user)) {
+			pj_strdup2(dlg_pool, &dlg_contact_uri->user, "anonymous");
+		}
+
 		if (ast_strlen_zero(session->endpoint->fromdomain)) {
 			pj_strdup2(dlg_pool, &dlg_info_uri->host, "anonymous.invalid");
 		}
-	}
+	} else {
+		ast_sip_add_usereqphone(session->endpoint, dlg_pool, dlg_info->uri);
+    }
 }
 
 int ast_sip_session_refresh(struct ast_sip_session *session,
@@ -965,6 +924,46 @@ int ast_sip_session_refresh(struct ast_sip_session *session,
 		method == AST_SIP_SESSION_REFRESH_METHOD_INVITE ? "re-INVITE" : "UPDATE",
 		ast_sorcery_object_get_id(session->endpoint));
 	ast_sip_session_send_request_with_cb(session, tdata, on_response);
+	return 0;
+}
+
+int ast_sip_session_regenerate_answer(struct ast_sip_session *session,
+		ast_sip_session_sdp_creation_cb on_sdp_creation)
+{
+	pjsip_inv_session *inv_session = session->inv_session;
+	pjmedia_sdp_session *new_answer = NULL;
+	const pjmedia_sdp_session *previous_offer = NULL;
+
+	/* The SDP answer can only be regenerated if it is still pending to be sent */
+	if (!inv_session->neg || (pjmedia_sdp_neg_get_state(inv_session->neg) != PJMEDIA_SDP_NEG_STATE_REMOTE_OFFER &&
+		pjmedia_sdp_neg_get_state(inv_session->neg) != PJMEDIA_SDP_NEG_STATE_WAIT_NEGO)) {
+		ast_log(LOG_WARNING, "Requested to regenerate local SDP answer for channel '%s' but negotiation in state '%s'\n",
+			ast_channel_name(session->channel), pjmedia_sdp_neg_state_str(pjmedia_sdp_neg_get_state(inv_session->neg)));
+		return -1;
+	}
+
+	pjmedia_sdp_neg_get_neg_remote(inv_session->neg, &previous_offer);
+	if (pjmedia_sdp_neg_get_state(inv_session->neg) == PJMEDIA_SDP_NEG_STATE_WAIT_NEGO) {
+		/* Transition the SDP negotiator back to when it received the remote offer */
+		pjmedia_sdp_neg_negotiate(inv_session->pool, inv_session->neg, 0);
+		pjmedia_sdp_neg_set_remote_offer(inv_session->pool, inv_session->neg, previous_offer);
+	}
+
+	new_answer = create_local_sdp(inv_session, session, previous_offer);
+	if (!new_answer) {
+		ast_log(LOG_WARNING, "Could not create a new local SDP answer for channel '%s'\n",
+			ast_channel_name(session->channel));
+		return -1;
+	}
+
+	if (on_sdp_creation) {
+		if (on_sdp_creation(session, new_answer)) {
+			return -1;
+		}
+	}
+
+	pjsip_inv_set_sdp_answer(inv_session, new_answer);
+
 	return 0;
 }
 
@@ -1095,7 +1094,9 @@ static pj_bool_t session_reinvite_on_rx_request(pjsip_rx_data *rdata)
 
 		/* Otherwise this is a new re-invite, so reject it */
 		if (pjsip_dlg_create_response(dlg, rdata, 491, NULL, &tdata) == PJ_SUCCESS) {
-			pjsip_endpt_send_response2(ast_sip_get_pjsip_endpoint(), rdata, tdata, NULL, NULL);
+			if (pjsip_endpt_send_response2(ast_sip_get_pjsip_endpoint(), rdata, tdata, NULL, NULL) != PJ_SUCCESS) {
+				pjsip_tx_data_dec_ref(tdata);
+			}
 		}
 
 		return PJ_TRUE;
@@ -1340,21 +1341,6 @@ static void session_destructor(void *obj)
 	ast_test_suite_event_notify("SESSION_DESTROYED", "Endpoint: %s", endpoint_name);
 }
 
-static int add_supplements(struct ast_sip_session *session)
-{
-	struct ast_sip_session_supplement *iter;
-	SCOPED_LOCK(lock, &session_supplements, AST_RWLIST_RDLOCK, AST_RWLIST_UNLOCK);
-
-	AST_RWLIST_TRAVERSE(&session_supplements, iter, next) {
-		struct ast_sip_session_supplement *copy = supplement_dup(iter);
-		if (!copy) {
-			return -1;
-		}
-		AST_LIST_INSERT_TAIL(&session->supplements, copy, next);
-	}
-	return 0;
-}
-
 static int add_session_media(void *obj, void *arg, int flags)
 {
 	struct sdp_handler_list *handler_list = obj;
@@ -1366,6 +1352,8 @@ static int add_session_media(void *obj, void *arg, int flags)
 		return CMP_STOP;
 	}
 	session_media->encryption = session->endpoint->media.rtp.encryption;
+	session_media->remote_ice = session->endpoint->media.rtp.ice_support;
+	session_media->remote_rtcp_mux = session->endpoint->rtcp_mux;
 	session_media->keepalive_sched_id = -1;
 	session_media->timeout_sched_id = -1;
 	/* Safe use of strcpy */
@@ -1424,7 +1412,8 @@ struct ast_sip_session *ast_sip_session_alloc(struct ast_sip_endpoint *endpoint,
 	if (!session->req_caps) {
 		return NULL;
 	}
-	session->datastores = ao2_container_alloc(DATASTORE_BUCKETS, datastore_hash, datastore_cmp);
+	session->datastores = ao2_container_alloc_hash(AO2_ALLOC_OPT_LOCK_MUTEX, 0,
+		DATASTORE_BUCKETS, datastore_hash, NULL, datastore_cmp);
 	if (!session->datastores) {
 		return NULL;
 	}
@@ -1446,7 +1435,8 @@ struct ast_sip_session *ast_sip_session_alloc(struct ast_sip_endpoint *endpoint,
 
 	session->endpoint = ao2_bump(endpoint);
 
-	session->media = ao2_container_alloc(MEDIA_BUCKETS, session_media_hash, session_media_cmp);
+	session->media = ao2_container_alloc_hash(AO2_ALLOC_OPT_LOCK_MUTEX, 0, MEDIA_BUCKETS,
+		session_media_hash, NULL, session_media_cmp);
 	if (!session->media) {
 		return NULL;
 	}
@@ -1481,7 +1471,9 @@ struct ast_sip_session *ast_sip_session_alloc(struct ast_sip_endpoint *endpoint,
 	session->contact = ao2_bump(contact);
 	session->inv_session = inv_session;
 
-	if (add_supplements(session)) {
+	session->dtmf = endpoint->dtmf;
+
+	if (ast_sip_session_add_supplements(session)) {
 		/* Release the ref held by session->inv_session */
 		ao2_ref(session, -1);
 		return NULL;
@@ -1532,7 +1524,7 @@ static int sip_session_suspend_task(void *data)
 	suspender->suspended = 1;
 	ast_cond_signal(&suspender->cond_suspended);
 
-	/* Wait for the the serializer suspension to be completed. */
+	/* Wait for the serializer suspension to be completed. */
 	while (!suspender->complete) {
 		ast_cond_wait(&suspender->cond_complete, ao2_object_get_lockaddr(suspender));
 	}
@@ -1906,10 +1898,8 @@ int ast_sip_session_defer_termination(struct ast_sip_session *session)
 	session->defer_end = 1;
 	session->ended_while_deferred = 0;
 
-	session->scheduled_termination.id = 0;
 	ao2_ref(session, +1);
-	session->scheduled_termination.user_data = session;
-	session->scheduled_termination.cb = session_termination_cb;
+	pj_timer_entry_init(&session->scheduled_termination, 0, session, session_termination_cb);
 
 	res = (pjsip_endpt_schedule_timer(ast_sip_get_pjsip_endpoint(),
 		&session->scheduled_termination, &delay) != PJ_SUCCESS) ? -1 : 0;
@@ -1931,8 +1921,8 @@ int ast_sip_session_defer_termination(struct ast_sip_session *session)
  */
 static void sip_session_defer_termination_stop_timer(struct ast_sip_session *session)
 {
-	if (pj_timer_heap_cancel(pjsip_endpt_get_timer_heap(ast_sip_get_pjsip_endpoint()),
-		&session->scheduled_termination)) {
+	if (pj_timer_heap_cancel_if_active(pjsip_endpt_get_timer_heap(ast_sip_get_pjsip_endpoint()),
+		&session->scheduled_termination, session->scheduled_termination.id)) {
 		ao2_ref(session, -1);
 	}
 }
@@ -2044,6 +2034,12 @@ static enum sip_get_destination_result get_destination(struct ast_sip_session *s
 		ast_copy_pj_str(domain, &sip_ruri->host, size);
 		pbx_builtin_setvar_helper(session->channel, "SIPDOMAIN", domain);
 
+		/*
+		 * Save off the INVITE Request-URI in case it is
+		 * needed: CHANNEL(pjsip,request_uri)
+		 */
+		session->request_uri = pjsip_uri_clone(session->inv_session->pool, ruri);
+
 		return SIP_GET_DEST_EXTEN_FOUND;
 	}
 
@@ -2070,7 +2066,9 @@ static pjsip_inv_session *pre_session_setup(pjsip_rx_data *rdata, const struct a
 
 	if (pjsip_inv_verify_request(rdata, &options, NULL, NULL, ast_sip_get_pjsip_endpoint(), &tdata) != PJ_SUCCESS) {
 		if (tdata) {
-			pjsip_endpt_send_response2(ast_sip_get_pjsip_endpoint(), rdata, tdata, NULL, NULL);
+			if (pjsip_endpt_send_response2(ast_sip_get_pjsip_endpoint(), rdata, tdata, NULL, NULL) != PJ_SUCCESS) {
+				pjsip_tx_data_dec_ref(tdata);
+			}
 		} else {
 			pjsip_endpt_respond_stateless(ast_sip_get_pjsip_endpoint(), rdata, 500, NULL, NULL, NULL);
 		}
@@ -2116,6 +2114,7 @@ static int new_invite(struct new_invite *invite)
 	pjsip_timer_setting timer;
 	pjsip_rdata_sdp_info *sdp_info;
 	pjmedia_sdp_session *local = NULL;
+	char buffer[AST_SOCKADDR_BUFLEN];
 
 	/* From this point on, any calls to pjsip_inv_terminate have the last argument as PJ_TRUE
 	 * so that we will be notified so we can destroy the session properly
@@ -2143,8 +2142,11 @@ static int new_invite(struct new_invite *invite)
 		}
 		goto end;
 	case SIP_GET_DEST_EXTEN_PARTIAL:
-		ast_debug(1, "Call from '%s' (%s:%s:%d) to extension '%s' - partial match\n", ast_sorcery_object_get_id(invite->session->endpoint),
-			invite->rdata->tp_info.transport->type_name, invite->rdata->pkt_info.src_name, invite->rdata->pkt_info.src_port, invite->session->exten);
+		ast_debug(1, "Call from '%s' (%s:%s) to extension '%s' - partial match\n",
+			ast_sorcery_object_get_id(invite->session->endpoint),
+			invite->rdata->tp_info.transport->type_name,
+			pj_sockaddr_print(&invite->rdata->pkt_info.src_addr, buffer, sizeof(buffer), 3),
+			invite->session->exten);
 
 		if (pjsip_inv_initial_answer(invite->session->inv_session, invite->rdata, 484, NULL, NULL, &tdata) == PJ_SUCCESS) {
 			ast_sip_session_send_response(invite->session, tdata);
@@ -2154,9 +2156,12 @@ static int new_invite(struct new_invite *invite)
 		goto end;
 	case SIP_GET_DEST_EXTEN_NOT_FOUND:
 	default:
-		ast_log(LOG_NOTICE, "Call from '%s' (%s:%s:%d) to extension '%s' rejected because extension not found in context '%s'.\n",
-			ast_sorcery_object_get_id(invite->session->endpoint), invite->rdata->tp_info.transport->type_name, invite->rdata->pkt_info.src_name,
-			invite->rdata->pkt_info.src_port, invite->session->exten, invite->session->endpoint->context);
+		ast_log(LOG_NOTICE, "Call from '%s' (%s:%s) to extension '%s' rejected because extension not found in context '%s'.\n",
+			ast_sorcery_object_get_id(invite->session->endpoint),
+			invite->rdata->tp_info.transport->type_name,
+			pj_sockaddr_print(&invite->rdata->pkt_info.src_addr, buffer, sizeof(buffer), 3),
+			invite->session->exten,
+			invite->session->endpoint->context);
 
 		if (pjsip_inv_initial_answer(invite->session->inv_session, invite->rdata, 404, NULL, NULL, &tdata) == PJ_SUCCESS) {
 			ast_sip_session_send_response(invite->session, tdata);
@@ -2527,6 +2532,12 @@ static void handle_outgoing_response(struct ast_sip_session *session, pjsip_tx_d
 	struct ast_sip_session_supplement *supplement;
 	struct pjsip_status_line status = tdata->msg->line.status;
 	pjsip_cseq_hdr *cseq = pjsip_msg_find_hdr(tdata->msg, PJSIP_H_CSEQ, NULL);
+
+	if (!cseq) {
+		ast_log(LOG_ERROR, "Cannot send response due to missing sequence header");
+		return;
+	}
+
 	ast_debug(3, "Method is %.*s, Response is %d %.*s\n", (int) pj_strlen(&cseq->method.name),
 		pj_strbuf(&cseq->method.name), status.code, (int) pj_strlen(&status.reason),
 		pj_strbuf(&status.reason));
@@ -2552,6 +2563,11 @@ static int session_end(void *vsession)
 			iter->session_end(session);
 		}
 	}
+
+	/* Release any media resources. */
+	ao2_cleanup(session->media);
+	session->media = NULL;
+
 	return 0;
 }
 
@@ -2609,8 +2625,12 @@ static void handle_incoming_before_media(pjsip_inv_session *inv,
 
 static void session_inv_on_state_changed(pjsip_inv_session *inv, pjsip_event *e)
 {
-	struct ast_sip_session *session = inv->mod_data[session_module.id];
+	struct ast_sip_session *session;
 	pjsip_event_id_e type;
+
+	if (ast_shutdown_final()) {
+		return;
+	}
 
 	if (e) {
 		print_debug_details(inv, NULL, e);
@@ -2619,6 +2639,7 @@ static void session_inv_on_state_changed(pjsip_inv_session *inv, pjsip_event *e)
 		type = PJSIP_EVENT_UNKNOWN;
 	}
 
+	session = inv->mod_data[session_module.id];
 	if (!session) {
 		return;
 	}
@@ -2674,6 +2695,36 @@ static void session_inv_on_new_session(pjsip_inv_session *inv, pjsip_event *e)
 	/* XXX STUB */
 }
 
+static int session_end_if_disconnected(int id, pjsip_inv_session *inv)
+{
+	struct ast_sip_session *session;
+
+	if (inv->state != PJSIP_INV_STATE_DISCONNECTED) {
+		return 0;
+	}
+
+	/*
+	 * We are locking because ast_sip_dialog_get_session() needs
+	 * the dialog locked to get the session by other threads.
+	 */
+	pjsip_dlg_inc_lock(inv->dlg);
+	session = inv->mod_data[id];
+	inv->mod_data[id] = NULL;
+	pjsip_dlg_dec_lock(inv->dlg);
+
+	/*
+	 * Pass the session ref held by session->inv_session to
+	 * session_end_completion().
+	 */
+	if (session
+		&& ast_sip_push_task(session->serializer, session_end_completion, session)) {
+		/* Do it anyway even though this is not the right thread. */
+		session_end_completion(session);
+	}
+
+	return 1;
+}
+
 static void session_inv_on_tsx_state_changed(pjsip_inv_session *inv, pjsip_transaction *tsx, pjsip_event *e)
 {
 	ast_sip_session_response_cb cb;
@@ -2681,13 +2732,7 @@ static void session_inv_on_tsx_state_changed(pjsip_inv_session *inv, pjsip_trans
 	struct ast_sip_session *session;
 	pjsip_tx_data *tdata;
 
-	/*
-	 * A race condition exists at shutdown where the res_pjsip_session can be
-	 * unloaded but this callback may still get called afterwards. In this case
-	 * the id may end up being -1 which is useless to us. To work around this
-	 * we store the current value and check/use it.
-	 */
-	if (id < 0) {
+	if (ast_shutdown_final()) {
 		return;
 	}
 
@@ -2698,6 +2743,17 @@ static void session_inv_on_tsx_state_changed(pjsip_inv_session *inv, pjsip_trans
 		/* The session has ended.  Ignore the transaction change. */
 		return;
 	}
+
+	/*
+	 * If the session is disconnected really nothing else to do unless currently transacting
+	 * a BYE. If a BYE then hold off destruction until the transaction timeout occurs. This
+	 * has to be done for BYEs because sometimes the dialog can be in a disconnected
+	 * state but the BYE request transaction has not yet completed.
+	 */
+	if (tsx->method.id != PJSIP_BYE_METHOD && session_end_if_disconnected(id, inv)) {
+		return;
+	}
+
 	switch (e->body.tsx_state.type) {
 	case PJSIP_EVENT_TX_MSG:
 		/* When we create an outgoing request, we do not have access to the transaction that
@@ -2820,49 +2876,12 @@ static void session_inv_on_tsx_state_changed(pjsip_inv_session *inv, pjsip_trans
 		}
 		break;
 	case PJSIP_EVENT_TRANSPORT_ERROR:
-		if (inv->state == PJSIP_INV_STATE_DISCONNECTED) {
-			/*
-			 * Clear the module data now to block session_inv_on_state_changed()
-			 * from calling session_end() if it hasn't already done so.
-			 */
-			inv->mod_data[id] = NULL;
-
-			/*
-			 * Pass the session ref held by session->inv_session to
-			 * session_end_completion().
-			 */
-			if (session
-				&& ast_sip_push_task(session->serializer, session_end_completion, session)) {
-				/* Do it anyway even though this is not the right thread. */
-				session_end_completion(session);
-			}
-			return;
-		}
-		break;
 	case PJSIP_EVENT_TIMER:
 		/*
 		 * The timer event is run by the pjsip monitor thread and not
 		 * by the session serializer.
 		 */
-		if (inv->state == PJSIP_INV_STATE_DISCONNECTED) {
-			/*
-			 * We are locking because ast_sip_dialog_get_session() needs
-			 * the dialog locked to get the session by other threads.
-			 */
-			pjsip_dlg_inc_lock(inv->dlg);
-			session = inv->mod_data[id];
-			inv->mod_data[id] = NULL;
-			pjsip_dlg_dec_lock(inv->dlg);
-
-			/*
-			 * Pass the session ref held by session->inv_session to
-			 * session_end_completion().
-			 */
-			if (session
-				&& ast_sip_push_task(session->serializer, session_end_completion, session)) {
-				/* Do it anyway even though this is not the right thread. */
-				session_end_completion(session);
-			}
+		if (session_end_if_disconnected(id, inv)) {
 			return;
 		}
 		break;
@@ -3025,9 +3044,14 @@ static struct pjmedia_sdp_session *create_local_sdp(pjsip_inv_session *inv, stru
 
 static void session_inv_on_rx_offer(pjsip_inv_session *inv, const pjmedia_sdp_session *offer)
 {
-	struct ast_sip_session *session = inv->mod_data[session_module.id];
+	struct ast_sip_session *session;
 	pjmedia_sdp_session *answer;
 
+	if (ast_shutdown_final()) {
+		return;
+	}
+
+	session = inv->mod_data[session_module.id];
 	if (handle_incoming_sdp(session, offer)) {
 		return;
 	}
@@ -3046,9 +3070,14 @@ static void session_inv_on_create_offer(pjsip_inv_session *inv, pjmedia_sdp_sess
 
 static void session_inv_on_media_update(pjsip_inv_session *inv, pj_status_t status)
 {
-	struct ast_sip_session *session = inv->mod_data[session_module.id];
+	struct ast_sip_session *session;
 	const pjmedia_sdp_session *local, *remote;
 
+	if (ast_shutdown_final()) {
+		return;
+	}
+
+	session = inv->mod_data[session_module.id];
 	if (!session || !session->channel) {
 		/*
 		 * If we don't have a session or channel then we really
@@ -3056,6 +3085,42 @@ static void session_inv_on_media_update(pjsip_inv_session *inv, pj_status_t stat
 		 * Just ignore
 		 */
 		return;
+	}
+
+	if (session->endpoint) {
+		int bail = 0;
+
+		/*
+		 * If following_fork is set, then this is probably the result of a
+		 * forked INVITE and SDP asnwers coming from the different fork UAS
+		 * destinations.  In this case updated_sdp_answer will also be set.
+		 *
+		 * If only updated_sdp_answer is set, then this is the non-forking
+		 * scenario where the same UAS just needs to change something like
+		 * the media port.
+		 */
+
+		if (inv->following_fork) {
+			if (session->endpoint->follow_early_media_fork) {
+				ast_debug(3, "Following early media fork with different To tags\n");
+			} else {
+				ast_debug(3, "Not following early media fork with different To tags\n");
+				bail = 1;
+			}
+		}
+#ifdef HAVE_PJSIP_INV_ACCEPT_MULTIPLE_SDP_ANSWERS
+		else if (inv->updated_sdp_answer) {
+			if (session->endpoint->accept_multiple_sdp_answers) {
+				ast_debug(3, "Accepting updated SDP with same To tag\n");
+			} else {
+				ast_debug(3, "Ignoring updated SDP answer with same To tag\n");
+				bail = 1;
+			}
+		}
+#endif
+		if (bail) {
+			return;
+		}
 	}
 
 	if ((status != PJ_SUCCESS) || (pjmedia_sdp_neg_get_active_local(inv->neg, &local) != PJ_SUCCESS) ||
@@ -3071,10 +3136,15 @@ static void session_inv_on_media_update(pjsip_inv_session *inv, pj_status_t stat
 
 static pjsip_redirect_op session_inv_on_redirected(pjsip_inv_session *inv, const pjsip_uri *target, const pjsip_event *e)
 {
-	struct ast_sip_session *session = inv->mod_data[session_module.id];
+	struct ast_sip_session *session;
 	const pjsip_sip_uri *uri;
 
-	if (!session->channel) {
+	if (ast_shutdown_final()) {
+		return PJSIP_REDIRECT_STOP;
+	}
+
+	session = inv->mod_data[session_module.id];
+	if (!session || !session->channel) {
 		return PJSIP_REDIRECT_STOP;
 	}
 
@@ -3134,8 +3204,9 @@ static void session_outgoing_nat_hook(pjsip_tx_data *tdata, struct ast_sip_trans
 	int stream;
 
 	/* SDP produced by us directly will never be multipart */
-	if (!transport_state || hook || !tdata->msg->body || pj_stricmp2(&tdata->msg->body->content_type.type, "application") ||
-		pj_stricmp2(&tdata->msg->body->content_type.subtype, "sdp") || ast_strlen_zero(transport->external_media_address)) {
+	if (!transport_state || hook || !tdata->msg->body ||
+		!ast_sip_is_content_type(&tdata->msg->body->content_type, "application", "sdp") ||
+		ast_strlen_zero(transport->external_media_address)) {
 		return;
 	}
 
@@ -3143,15 +3214,19 @@ static void session_outgoing_nat_hook(pjsip_tx_data *tdata, struct ast_sip_trans
 
 	if (sdp->conn) {
 		char host[NI_MAXHOST];
-		struct ast_sockaddr addr = { { 0, } };
+		struct ast_sockaddr our_sdp_addr = { { 0, } };
 
 		ast_copy_pj_str(host, &sdp->conn->addr, sizeof(host));
-		ast_sockaddr_parse(&addr, host, PARSE_PORT_FORBID);
+		ast_sockaddr_parse(&our_sdp_addr, host, PARSE_PORT_FORBID);
 
-		if (!transport_state->localnet
-			|| ast_apply_ha(transport_state->localnet, &addr) != AST_SENSE_ALLOW) {
-			ast_debug(5, "Setting external media address to %s\n", transport->external_media_address);
-			pj_strdup2(tdata->pool, &sdp->conn->addr, transport->external_media_address);
+		/* Reversed check here. We don't check the remote
+		 * endpoint being in our local net, but whether our
+		 * outgoing session IP is local. If it is, we'll do
+		 * rewriting. No localnet configured? Always rewrite. */
+		if (ast_sip_transport_is_local(transport_state, &our_sdp_addr) || !transport_state->localnet) {
+			ast_debug(5, "Setting external media address to %s\n", ast_sockaddr_stringify_host(&transport_state->external_media_address));
+			pj_strdup2(tdata->pool, &sdp->conn->addr, ast_sockaddr_stringify_host(&transport_state->external_media_address));
+			pj_strassign(&sdp->origin.addr, &sdp->conn->addr);
 		}
 	}
 
@@ -3194,8 +3269,8 @@ static int load_module(void)
 	}
 	nat_hook->outgoing_external_message = session_outgoing_nat_hook;
 	ast_sorcery_create(ast_sip_get_sorcery(), nat_hook);
-	sdp_handlers = ao2_container_alloc(SDP_HANDLER_BUCKETS,
-			sdp_handler_list_hash, sdp_handler_list_cmp);
+	sdp_handlers = ao2_container_alloc_hash(AO2_ALLOC_OPT_LOCK_MUTEX, 0,
+		SDP_HANDLER_BUCKETS, sdp_handler_list_hash, NULL, sdp_handler_list_cmp);
 	if (!sdp_handlers) {
 		return AST_MODULE_LOAD_DECLINE;
 	}

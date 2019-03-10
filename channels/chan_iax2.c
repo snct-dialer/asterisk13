@@ -52,6 +52,7 @@
  */
 
 /*** MODULEINFO
+	<use type="module">res_crypto</use>
 	<use type="external">crypto</use>
 	<support_level>core</support_level>
  ***/
@@ -1462,6 +1463,8 @@ static void network_change_stasis_subscribe(void)
 	if (!network_change_sub) {
 		network_change_sub = stasis_subscribe(ast_system_topic(),
 			network_change_stasis_cb, NULL);
+		stasis_subscription_accept_message_type(network_change_sub, ast_network_change_type());
+		stasis_subscription_set_filter(network_change_sub, STASIS_SUBSCRIPTION_FILTER_SELECTIVE);
 	}
 }
 
@@ -1475,6 +1478,8 @@ static void acl_change_stasis_subscribe(void)
 	if (!acl_change_sub) {
 		acl_change_sub = stasis_subscribe(ast_security_topic(),
 			acl_change_stasis_cb, NULL);
+		stasis_subscription_accept_message_type(acl_change_sub, ast_named_acl_change_type());
+		stasis_subscription_set_filter(acl_change_sub, STASIS_SUBSCRIPTION_FILTER_SELECTIVE);
 	}
 }
 
@@ -7166,7 +7171,7 @@ static char *complete_iax2_unregister(const char *line, const char *word, int po
 	if (pos == 2) {
 		struct ao2_iterator i = ao2_iterator_init(peers, 0);
 		while ((p = ao2_iterator_next(&i))) {
-			if (!strncasecmp(p->name, word, wordlen) && 
+			if (!strncasecmp(p->name, word, wordlen) &&
 				++which > state && p->expire > -1) {
 				res = ast_strdup(p->name);
 				peer_unref(p);
@@ -8571,7 +8576,7 @@ static int try_transfer(struct chan_iax2_pvt *pvt, struct iax_ies *ies)
 {
 	int newcall = 0;
 	struct iax_ie_data ied;
-	struct ast_sockaddr new;
+	struct ast_sockaddr new = { {0,} };
 
 	memset(&ied, 0, sizeof(ied));
 	if (!ast_sockaddr_isnull(&ies->apparent_addr)) {
@@ -12582,6 +12587,8 @@ static struct ast_channel *iax2_request(const char *type, struct ast_format_cap 
 
 static void *network_thread(void *ignore)
 {
+	int res;
+
 	if (timer) {
 		ast_io_add(io, ast_timer_fd(timer), timing_read, AST_IO_IN | AST_IO_PRI, NULL);
 	}
@@ -12591,7 +12598,11 @@ static void *network_thread(void *ignore)
 		/* Wake up once a second just in case SIGURG was sent while
 		 * we weren't in poll(), to make sure we don't hang when trying
 		 * to unload. */
-		if (ast_io_wait(io, 1000) <= 0) {
+		res = ast_io_wait(io, 1000);
+		/* Timeout(=0), and EINTR is not a thread exit condition. We do
+		 * not want to exit the thread loop on these conditions. */
+		if (res < 0 && errno != -EINTR) {
+			ast_log(LOG_ERROR, "IAX2 network thread unexpected exit: %s\n", strerror(errno));
 			break;
 		}
 	}
@@ -13084,7 +13095,7 @@ static struct iax2_peer *build_peer(const char *name, struct ast_variable *v, st
 		ast_free_acl_list(oldacl);
 	}
 
-	if (!ast_strlen_zero(peer->mailbox)) {
+	if (!ast_strlen_zero(peer->mailbox) && !peer->mwi_event_sub) {
 		struct stasis_topic *mailbox_specific_topic;
 
 		mailbox_specific_topic = ast_mwi_topic(peer->mailbox);
@@ -13093,6 +13104,8 @@ static struct iax2_peer *build_peer(const char *name, struct ast_variable *v, st
 			 * mailboxes.  However, we just grab the events out of the cache when it
 			 * is time to send MWI, since it is only sent with a REGACK. */
 			peer->mwi_event_sub = stasis_subscribe_pool(mailbox_specific_topic, stasis_subscription_cb_noop, NULL);
+			stasis_subscription_accept_message_type(peer->mwi_event_sub, ast_mwi_state_type());
+			stasis_subscription_set_filter(peer->mwi_event_sub, STASIS_SUBSCRIPTION_FILTER_SELECTIVE);
 		}
 	}
 
@@ -14319,7 +14332,7 @@ static int iax2_matchmore(struct ast_channel *chan, const char *context, const c
 static int iax2_exec(struct ast_channel *chan, const char *context, const char *exten, int priority, const char *callerid, const char *data)
 {
 	char odata[256];
-	char req[256];
+	char req[sizeof(odata) + AST_MAX_CONTEXT + AST_MAX_EXTENSION + sizeof("IAX2//@")];
 	char *ncontext;
 	struct iax2_dpcache *dp = NULL;
 	struct ast_app *dial = NULL;
@@ -14845,23 +14858,54 @@ static int load_objects(void)
 	peers = users = iax_peercallno_pvts = iax_transfercallno_pvts = NULL;
 	peercnts = callno_limits = calltoken_ignores = NULL;
 
-	if (!(peers = ao2_container_alloc(MAX_PEER_BUCKETS, peer_hash_cb, peer_cmp_cb))) {
+	peers = ao2_container_alloc_hash(AO2_ALLOC_OPT_LOCK_MUTEX, 0, MAX_PEER_BUCKETS,
+		peer_hash_cb, NULL, peer_cmp_cb);
+	if (!peers) {
 		goto container_fail;
-	} else if (!(users = ao2_container_alloc(MAX_USER_BUCKETS, user_hash_cb, user_cmp_cb))) {
+	}
+
+	users = ao2_container_alloc_hash(AO2_ALLOC_OPT_LOCK_MUTEX, 0, MAX_USER_BUCKETS,
+		user_hash_cb, NULL, user_cmp_cb);
+	if (!users) {
 		goto container_fail;
-	} else if (!(iax_peercallno_pvts = ao2_container_alloc(IAX_MAX_CALLS, pvt_hash_cb, pvt_cmp_cb))) {
+	}
+
+	iax_peercallno_pvts = ao2_container_alloc_hash(AO2_ALLOC_OPT_LOCK_MUTEX, 0,
+		IAX_MAX_CALLS, pvt_hash_cb, NULL, pvt_cmp_cb);
+	if (!iax_peercallno_pvts) {
 		goto container_fail;
-	} else if (!(iax_transfercallno_pvts = ao2_container_alloc(IAX_MAX_CALLS, transfercallno_pvt_hash_cb, transfercallno_pvt_cmp_cb))) {
+	}
+
+	iax_transfercallno_pvts = ao2_container_alloc_hash(AO2_ALLOC_OPT_LOCK_MUTEX, 0,
+		IAX_MAX_CALLS, transfercallno_pvt_hash_cb, NULL, transfercallno_pvt_cmp_cb);
+	if (!iax_transfercallno_pvts) {
 		goto container_fail;
-	} else if (!(peercnts = ao2_container_alloc(MAX_PEER_BUCKETS, peercnt_hash_cb, peercnt_cmp_cb))) {
+	}
+
+	peercnts = ao2_container_alloc_hash(AO2_ALLOC_OPT_LOCK_MUTEX, 0, MAX_PEER_BUCKETS,
+		peercnt_hash_cb, NULL, peercnt_cmp_cb);
+	if (!peercnts) {
 		goto container_fail;
-	} else if (!(callno_limits = ao2_container_alloc(MAX_PEER_BUCKETS, addr_range_hash_cb, addr_range_cmp_cb))) {
+	}
+
+	callno_limits = ao2_container_alloc_hash(AO2_ALLOC_OPT_LOCK_MUTEX, 0,
+		MAX_PEER_BUCKETS, addr_range_hash_cb, NULL, addr_range_cmp_cb);
+	if (!callno_limits) {
 		goto container_fail;
-	} else if (!(calltoken_ignores = ao2_container_alloc(MAX_PEER_BUCKETS, addr_range_hash_cb, addr_range_cmp_cb))) {
+	}
+
+	calltoken_ignores = ao2_container_alloc_hash(AO2_ALLOC_OPT_LOCK_MUTEX, 0,
+		MAX_PEER_BUCKETS, addr_range_hash_cb, NULL, addr_range_cmp_cb);
+	if (!calltoken_ignores) {
 		goto container_fail;
-	} else if (create_callno_pools()) {
+	}
+
+	if (create_callno_pools()) {
 		goto container_fail;
-	} else if  (!(transmit_processor = ast_taskprocessor_get("iax2_transmit", TPS_REF_DEFAULT))) {
+	}
+
+	transmit_processor = ast_taskprocessor_get("iax2_transmit", TPS_REF_DEFAULT);
+	if (!transmit_processor) {
 		goto container_fail;
 	}
 
@@ -15238,5 +15282,4 @@ AST_MODULE_INFO(ASTERISK_GPL_KEY, AST_MODFLAG_LOAD_ORDER, "Inter Asterisk eXchan
 		.unload = unload_module,
 		.reload = reload,
 		.load_pri = AST_MODPRI_CHANNEL_DRIVER,
-		.nonoptreq = "res_crypto",
-		);
+	       );

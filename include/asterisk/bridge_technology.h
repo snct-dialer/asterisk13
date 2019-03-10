@@ -46,11 +46,9 @@ enum ast_bridge_preference {
  * performing talking optimizations.
  */
 struct ast_bridge_tech_optimizations {
-	/*! The amount of time in ms that talking must be detected before
-	 *  the dsp determines that talking has occurred */
+	/*! Minimum average magnitude threshold to determine talking by the DSP. */
 	unsigned int talking_threshold;
-	/*! The amount of time in ms that silence must be detected before
-	 *  the dsp determines that talking has stopped */
+	/*! Time in ms of silence necessary to declare talking stopped by the bridge. */
 	unsigned int silence_threshold;
 	/*! Whether or not the bridging technology should drop audio
 	 *  detected as silence from the mix. */
@@ -108,11 +106,13 @@ struct ast_bridge_technology {
 	 *
 	 * \note On entry, bridge is already locked.
 	 *
-	 * \note The bridge technology must tollerate a failed to join channel
+	 * \note The bridge technology must tolerate a failed to join channel
 	 * until it can be kicked from the bridge.
 	 *
 	 * \note A channel may be in a suspended state already when joining a bridge
 	 * technology. The technology must handle this case.
+	 *
+	 * \note A channel may not be answered when joining a bridge technology.
 	 */
 	int (*join)(struct ast_bridge *bridge, struct ast_bridge_channel *bridge_channel);
 	/*!

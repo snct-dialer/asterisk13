@@ -18,6 +18,7 @@
 
 /*** MODULEINFO
 	<depend>pjproject</depend>
+	<depend>res_pjproject</depend>
 	<depend>res_pjsip</depend>
 	<support_level>core</support_level>
  ***/
@@ -33,6 +34,7 @@
 #include "asterisk/taskprocessor.h"
 #include "asterisk/threadpool.h"
 #include "asterisk/datastore.h"
+#include "res_pjsip/include/res_pjsip_private.h"
 
 /*** DOCUMENTATION
 	<configInfo name="res_pjsip_outbound_publish" language="en_US">
@@ -289,7 +291,8 @@ static struct ast_sip_event_publisher_handler *find_publisher_handler_for_event_
 /*! \brief Helper function which cancels the refresh timer on a client */
 static void cancel_publish_refresh(struct ast_sip_outbound_publish_client *client)
 {
-	if (pj_timer_heap_cancel(pjsip_endpt_get_timer_heap(ast_sip_get_pjsip_endpoint()), &client->timer)) {
+	if (pj_timer_heap_cancel_if_active(pjsip_endpt_get_timer_heap(ast_sip_get_pjsip_endpoint()),
+		&client->timer, 0)) {
 		/* The timer was successfully cancelled, drop the refcount of the client */
 		ao2_ref(client, -1);
 	}
@@ -1071,7 +1074,8 @@ static struct ast_sip_outbound_publish_state *sip_outbound_publish_state_alloc(
 		return NULL;
 	}
 
-	state->client->datastores = ao2_container_alloc(DATASTORE_BUCKETS, datastore_hash, datastore_cmp);
+	state->client->datastores = ao2_container_alloc_hash(AO2_ALLOC_OPT_LOCK_MUTEX, 0,
+		DATASTORE_BUCKETS, datastore_hash, NULL, datastore_cmp);
 	if (!state->client->datastores) {
 		ao2_ref(state, -1);
 		return NULL;
@@ -1088,8 +1092,7 @@ static struct ast_sip_outbound_publish_state *sip_outbound_publish_state_alloc(
 		return NULL;
 	}
 
-	state->client->timer.user_data = state->client;
-	state->client->timer.cb = sip_outbound_publish_timer_cb;
+	pj_timer_entry_init(&state->client->timer, 0, state->client, sip_outbound_publish_timer_cb);
 	state->client->transport_name = ast_strdup(publish->transport);
 	state->client->publish = ao2_bump(publish);
 
@@ -1100,7 +1103,8 @@ static struct ast_sip_outbound_publish_state *sip_outbound_publish_state_alloc(
 static int initialize_publish_client(struct ast_sip_outbound_publish *publish,
 				     struct ast_sip_outbound_publish_state *state)
 {
-	if (ast_sip_push_task_synchronous(state->client->serializer, sip_outbound_publish_client_alloc, state->client)) {
+	if (ast_sip_push_task_wait_serializer(state->client->serializer,
+		sip_outbound_publish_client_alloc, state->client)) {
 		ast_log(LOG_ERROR, "Unable to create client for outbound publish '%s'\n",
 			ast_sorcery_object_get_id(publish));
 		return -1;
@@ -1115,8 +1119,25 @@ static int validate_publish_config(struct ast_sip_outbound_publish *publish)
 		ast_log(LOG_ERROR, "No server URI specified on outbound publish '%s'\n",
 			ast_sorcery_object_get_id(publish));
 		return -1;
+	} else if (ast_sip_validate_uri_length(publish->server_uri)) {
+		ast_log(LOG_ERROR, "Server URI or hostname length exceeds pjproject limit or is not a sip(s) uri: '%s' on outbound publish '%s'\n",
+			publish->server_uri,
+			ast_sorcery_object_get_id(publish));
+		return -1;
 	} else if (ast_strlen_zero(publish->event)) {
 		ast_log(LOG_ERROR, "No event type specified for outbound publish '%s'\n",
+			ast_sorcery_object_get_id(publish));
+		return -1;
+	} else if (!ast_strlen_zero(publish->from_uri)
+		&& ast_sip_validate_uri_length(publish->from_uri)) {
+		ast_log(LOG_ERROR, "From URI or hostname length exceeds pjproject limit or is not a sip(s) uri: '%s' on outbound publish '%s'\n",
+			publish->from_uri,
+			ast_sorcery_object_get_id(publish));
+		return -1;
+	} else if (!ast_strlen_zero(publish->to_uri)
+		&& ast_sip_validate_uri_length(publish->to_uri)) {
+		ast_log(LOG_ERROR, "To URI or hostname length exceeds pjproject limit or is not a sip(s) uri: '%s' on outbound publish '%s'\n",
+			publish->to_uri,
 			ast_sorcery_object_get_id(publish));
 		return -1;
 	}
@@ -1180,9 +1201,9 @@ static int sip_outbound_publish_apply(const struct ast_sorcery *sorcery, void *o
 	 * object if created/updated, or keep the old object if an error occurs.
 	 */
 	if (!new_states) {
-		new_states = ao2_container_alloc_options(
-			AO2_ALLOC_OPT_LOCK_NOLOCK, DEFAULT_STATE_BUCKETS,
-			outbound_publish_state_hash, outbound_publish_state_cmp);
+		new_states = ao2_container_alloc_hash(
+			AO2_ALLOC_OPT_LOCK_NOLOCK, 0, DEFAULT_STATE_BUCKETS,
+			outbound_publish_state_hash, NULL, outbound_publish_state_cmp);
 
 		if (!new_states) {
 			ast_log(LOG_ERROR, "Unable to allocate new states container\n");
@@ -1315,6 +1336,7 @@ static int reload_module(void)
 }
 
 AST_MODULE_INFO(ASTERISK_GPL_KEY, AST_MODFLAG_GLOBAL_SYMBOLS | AST_MODFLAG_LOAD_ORDER, "PJSIP Outbound Publish Support",
+		.support_level = AST_MODULE_SUPPORT_CORE,
 		.load = load_module,
 		.reload = reload_module,
 		.unload = unload_module,

@@ -41,6 +41,9 @@
 		<enum name="uri">
 			<para>R/O Get the URI from the Contact: header.</para>
 		</enum>
+		<enum name="ruri">
+			<para>R/O Get the Request-URI from the INVITE header.</para>
+		</enum>
 		<enum name="useragent">
 			<para>R/O Get the useragent.</para>
 		</enum>
@@ -133,7 +136,7 @@ int sip_acf_channel_read(struct ast_channel *chan, const char *funcname, char *p
 		AST_APP_ARG(type);
 		AST_APP_ARG(field);
 	);
-		
+
 	/* Check for zero arguments */
 	if (ast_strlen_zero(parse)) {
 		ast_log(LOG_ERROR, "Cannot call %s without arguments\n", funcname);
@@ -164,6 +167,9 @@ int sip_acf_channel_read(struct ast_channel *chan, const char *funcname, char *p
 		ast_copy_string(buf, p->from, buflen);
 	} else if (!strcasecmp(args.param, "uri")) {
 		ast_copy_string(buf, p->uri, buflen);
+	} else if (!strcasecmp(args.param, "ruri")) {
+		char *tmpruri = REQ_OFFSET_TO_STR(&p->initreq, rlpart2);
+		ast_copy_string(buf, tmpruri, buflen);
 	} else if (!strcasecmp(args.param, "useragent")) {
 		ast_copy_string(buf, p->useragent, buflen);
 	} else if (!strcasecmp(args.param, "peername")) {
@@ -486,6 +492,9 @@ done:
 		dialog_unlink_all(p);
 		dialog_unref(p, "Destroy test object");
 	}
+	if (chan) {
+		ast_channel_unref(chan);
+	}
 	ast_rtp_engine_unregister(&test_engine);
 	return res;
 }
@@ -502,4 +511,3 @@ void sip_dialplan_function_unregister_tests(void)
 {
 	AST_TEST_UNREGISTER(test_sip_rtpqos_1);
 }
-

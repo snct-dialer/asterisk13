@@ -151,7 +151,10 @@ AST_TEST_DEFINE(default_taskprocessor)
 		return AST_TEST_FAIL;
 	}
 
-	ast_taskprocessor_push(tps, task, task_data);
+	if (ast_taskprocessor_push(tps, task, task_data)) {
+		ast_test_status_update(test, "Failed to queue task\n");
+		return AST_TEST_FAIL;
+	}
 
 	res = task_wait(task_data);
 	if (res != 0) {
@@ -240,7 +243,11 @@ AST_TEST_DEFINE(default_taskprocessor_load)
 
 	for (i = 0; i < NUM_TASKS; ++i) {
 		rand_data[i] = ast_random();
-		ast_taskprocessor_push(tps, load_task, &rand_data[i]);
+		if (ast_taskprocessor_push(tps, load_task, &rand_data[i])) {
+			ast_test_status_update(test, "Failed to queue task\n");
+			res = AST_TEST_FAIL;
+			goto test_end;
+		}
 	}
 
 	ast_mutex_lock(&load_task_results.lock);
@@ -438,14 +445,22 @@ AST_TEST_DEFINE(taskprocessor_listener)
 		goto test_exit;
 	}
 
-	ast_taskprocessor_push(tps, listener_test_task, NULL);
+	if (ast_taskprocessor_push(tps, listener_test_task, NULL)) {
+		ast_test_status_update(test, "Failed to queue task\n");
+		res = AST_TEST_FAIL;
+		goto test_exit;
+	}
 
 	if (check_stats(test, pvt, 1, 0, 1) < 0) {
 		res = AST_TEST_FAIL;
 		goto test_exit;
 	}
 
-	ast_taskprocessor_push(tps, listener_test_task, NULL);
+	if (ast_taskprocessor_push(tps, listener_test_task, NULL)) {
+		ast_test_status_update(test, "Failed to queue task\n");
+		res = AST_TEST_FAIL;
+		goto test_exit;
+	}
 
 	if (check_stats(test, pvt, 2, 0, 1) < 0) {
 		res = AST_TEST_FAIL;
@@ -652,7 +667,7 @@ AST_TEST_DEFINE(taskprocessor_shutdown)
 	/* Wait for shutdown to complete */
 	pthread_join(shutdown_thread, NULL);
 
-	/* Should have also also completed task2 */
+	/* Should have also completed task2 */
 	wait_res = shutdown_has_completed(task2);
 	if (!wait_res) {
 		ast_test_status_update(test, "Task2 didn't finish\n");
@@ -677,7 +692,7 @@ AST_TEST_DEFINE(taskprocessor_push_local)
 {
 	RAII_VAR(struct ast_taskprocessor *, tps, NULL,
 		ast_taskprocessor_unreference);
-	struct task_data *task_data;
+	RAII_VAR(struct task_data *, task_data, NULL, ao2_cleanup);
 	int local_data;
 	int res;
 
@@ -710,7 +725,10 @@ AST_TEST_DEFINE(taskprocessor_push_local)
 	local_data = 0;
 	ast_taskprocessor_set_local(tps, &local_data);
 
-	ast_taskprocessor_push_local(tps, local_task_exe, task_data);
+	if (ast_taskprocessor_push_local(tps, local_task_exe, task_data)) {
+		ast_test_status_update(test, "Failed to queue task\n");
+		return AST_TEST_FAIL;
+	}
 
 	res = task_wait(task_data);
 	if (res != 0) {

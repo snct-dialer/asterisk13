@@ -768,6 +768,9 @@ struct ao2_container *__ao2_container_clone(struct ao2_container *orig, enum sea
 		return NULL;
 	}
 
+	/* This test is correct.  clone must be locked before calling
+	 * ao2_container_dup when the OBJ_NOLOCK flag is set, otherwise
+	 * we could have errors in __adjust_lock. */
 	if (flags & OBJ_NOLOCK) {
 		ao2_wrlock(clone);
 	}
@@ -1024,12 +1027,15 @@ void ao2_container_unregister(const char *name)
 }
 
 #if defined(AO2_DEBUG)
-static int ao2_complete_reg_cb(void *obj, void *arg, void *data, int flags)
+static int ao2_complete_reg_cb(void *obj, void *arg, int flags)
 {
-	struct ao2_reg_match *which = data;
+	struct ao2_reg_container *reg = obj;
 
-	/* ao2_reg_sort_cb() has already filtered the search to matching keys */
-	return (which->find_nth < ++which->count) ? (CMP_MATCH | CMP_STOP) : 0;
+	if (ast_cli_completion_add(ast_strdup(reg->name))) {
+		return CMP_STOP;
+	}
+
+	return 0;
 }
 #endif	/* defined(AO2_DEBUG) */
 
@@ -1037,9 +1043,6 @@ static int ao2_complete_reg_cb(void *obj, void *arg, void *data, int flags)
 static char *complete_container_names(struct ast_cli_args *a)
 {
 	struct ao2_reg_partial_key partial_key;
-	struct ao2_reg_match which;
-	struct ao2_reg_container *reg;
-	char *name;
 
 	if (a->pos != 3) {
 		return NULL;
@@ -1047,17 +1050,10 @@ static char *complete_container_names(struct ast_cli_args *a)
 
 	partial_key.len = strlen(a->word);
 	partial_key.name = a->word;
-	which.find_nth = a->n;
-	which.count = 0;
-	reg = ao2_t_callback_data(reg_containers, partial_key.len ? OBJ_SEARCH_PARTIAL_KEY : 0,
-		ao2_complete_reg_cb, &partial_key, &which, "Find partial registered container");
-	if (reg) {
-		name = ast_strdup(reg->name);
-		ao2_t_ref(reg, -1, "Done with registered container object.");
-	} else {
-		name = NULL;
-	}
-	return name;
+	ao2_callback(reg_containers, partial_key.len ? OBJ_SEARCH_PARTIAL_KEY : 0,
+		ao2_complete_reg_cb, &partial_key);
+
+	return NULL;
 }
 #endif	/* defined(AO2_DEBUG) */
 
@@ -1236,4 +1232,3 @@ int container_init(void)
 
 	return 0;
 }
-

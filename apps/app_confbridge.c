@@ -69,6 +69,7 @@ ASTERISK_FILE_VERSION(__FILE__, "$Revision$")
 #include "asterisk/test.h"
 #include "asterisk/stasis.h"
 #include "asterisk/stasis_bridges.h"
+#include "asterisk/stasis_channels.h"
 #include "asterisk/json.h"
 #include "asterisk/format_cache.h"
 #include "asterisk/taskprocessor.h"
@@ -228,6 +229,69 @@ ASTERISK_FILE_VERSION(__FILE__, "$Revision$")
 			ConfbridgeListComplete.</para>
 		</description>
 	</manager>
+	<managerEvent language="en_US" name="ConfbridgeList">
+		<managerEventInstance class="EVENT_FLAG_REPORTING">
+			<synopsis>Raised as part of the ConfbridgeList action response list.</synopsis>
+			<syntax>
+				<parameter name="Conference">
+					<para>The name of the Confbridge conference.</para>
+				</parameter>
+				<parameter name="Admin">
+					<para>Identifies this user as an admin user.</para>
+					<enumlist>
+						<enum name="Yes"/>
+						<enum name="No"/>
+					</enumlist>
+				</parameter>
+				<parameter name="MarkedUser">
+					<para>Identifies this user as a marked user.</para>
+					<enumlist>
+						<enum name="Yes"/>
+						<enum name="No"/>
+					</enumlist>
+				</parameter>
+				<parameter name="WaitMarked">
+					<para>Must this user wait for a marked user to join?</para>
+					<enumlist>
+						<enum name="Yes"/>
+						<enum name="No"/>
+					</enumlist>
+				</parameter>
+				<parameter name="EndMarked">
+					<para>Does this user get kicked after the last marked user leaves?</para>
+					<enumlist>
+						<enum name="Yes"/>
+						<enum name="No"/>
+					</enumlist>
+				</parameter>
+				<parameter name="Waiting">
+					<para>Is this user waiting for a marked user to join?</para>
+					<enumlist>
+						<enum name="Yes"/>
+						<enum name="No"/>
+					</enumlist>
+				</parameter>
+				<parameter name="Muted">
+					<para>The current mute status.</para>
+					<enumlist>
+						<enum name="Yes"/>
+						<enum name="No"/>
+					</enumlist>
+				</parameter>
+				<parameter name="Talking">
+					<para>Is this user talking?</para>
+					<enumlist>
+						<enum name="Yes"/>
+						<enum name="No"/>
+					</enumlist>
+				</parameter>
+				<parameter name="AnsweredTime">
+					<para>The number of seconds the channel has been up.</para>
+				</parameter>
+				<channel_snapshot/>
+			</syntax>
+		</managerEventInstance>
+	</managerEvent>
 	<manager name="ConfbridgeListRooms" language="en_US">
 		<synopsis>
 			List active conferences.
@@ -528,9 +592,9 @@ static void send_join_event(struct confbridge_user *user, struct confbridge_conf
 {
 	struct ast_json *json_object;
 
-	json_object = ast_json_pack("{s: b}",
-		"admin", ast_test_flag(&user->u_profile, USER_OPT_ADMIN)
-	);
+	json_object = ast_json_pack("{s: b, s: b}",
+		"admin", ast_test_flag(&user->u_profile, USER_OPT_ADMIN),
+		"muted", user->muted);
 	if (!json_object) {
 		return;
 	}
@@ -1030,13 +1094,15 @@ static void destroy_conference_bridge(void *obj)
 		if (conference->playback_queue) {
 			struct hangup_data hangup;
 			hangup_data_init(&hangup, conference);
-			ast_taskprocessor_push(conference->playback_queue, hangup_playback, &hangup);
 
-			ast_mutex_lock(&hangup.lock);
-			while (!hangup.hungup) {
-				ast_cond_wait(&hangup.cond, &hangup.lock);
+			if (!ast_taskprocessor_push(conference->playback_queue, hangup_playback, &hangup)) {
+				ast_mutex_lock(&hangup.lock);
+				while (!hangup.hungup) {
+					ast_cond_wait(&hangup.cond, &hangup.lock);
+				}
+				ast_mutex_unlock(&hangup.lock);
 			}
-			ast_mutex_unlock(&hangup.lock);
+
 			hangup_data_destroy(&hangup);
 		} else {
 			/* Playback queue is not yet allocated. Just hang up the channel straight */
@@ -1277,7 +1343,7 @@ int conf_handle_inactive_waitmarked(struct confbridge_user *user)
 	return 0;
 }
 
-int conf_handle_only_unmarked(struct confbridge_user *user)
+int conf_handle_only_person(struct confbridge_user *user)
 {
 	/* If audio prompts have not been quieted or this prompt quieted play it on out */
 	if (!ast_test_flag(&user->u_profile, USER_OPT_QUIET | USER_OPT_NOONLYPERSON)) {
@@ -1380,25 +1446,19 @@ static int alloc_playback_chan(struct confbridge_conference *conference)
 /*!
  * \brief Push the announcer channel into the bridge
  *
- * This runs in the playback queue taskprocessor.
- *
- * \param data A confbridge_conference
+ * \param conference Conference bridge to push the announcer to
  * \retval 0 Success
  * \retval -1 Failed to push the channel to the bridge
  */
-static int push_announcer(void *data)
+static int push_announcer(struct confbridge_conference *conference)
 {
-	struct confbridge_conference *conference = data;
-
 	if (conf_announce_channel_push(conference->playback_chan)) {
 		ast_hangup(conference->playback_chan);
 		conference->playback_chan = NULL;
-		ao2_cleanup(conference);
 		return -1;
 	}
 
 	ast_autoservice_start(conference->playback_chan);
-	ao2_cleanup(conference);
 	return 0;
 }
 
@@ -1499,7 +1559,7 @@ static struct confbridge_conference *join_conference_bridge(const char *conferen
 			return NULL;
 		}
 
-		if (ast_taskprocessor_push(conference->playback_queue, push_announcer, ao2_bump(conference))) {
+		if (push_announcer(conference)) {
 			ao2_unlink(conference_bridges, conference);
 			ao2_ref(conference, -1);
 			ao2_unlock(conference_bridges);
@@ -2028,7 +2088,7 @@ static int play_sound_number(struct confbridge_conference *conference, int say_n
 
 static int conf_handle_talker_cb(struct ast_bridge_channel *bridge_channel, void *hook_pvt, int talking)
 {
-	const struct confbridge_user *user = hook_pvt;
+	struct confbridge_user *user = hook_pvt;
 	RAII_VAR(struct confbridge_conference *, conference, NULL, ao2_cleanup);
 	struct ast_json *talking_extras;
 
@@ -2037,6 +2097,10 @@ static int conf_handle_talker_cb(struct ast_bridge_channel *bridge_channel, void
 		/* Remove the hook since the conference does not exist. */
 		return -1;
 	}
+
+	ao2_lock(conference);
+	user->talking = talking;
+	ao2_unlock(conference);
 
 	talking_extras = ast_json_pack("{s: s, s: b}",
 		"talking_status", talking ? "on" : "off",
@@ -2137,6 +2201,7 @@ static int conf_rec_name(struct confbridge_user *user, const char *conf_name)
 	}
 
 	if (res == -1) {
+		ast_filedelete(user->name_rec_location, NULL);
 		user->name_rec_location[0] = '\0';
 		return -1;
 	}
@@ -2228,6 +2293,7 @@ static int confbridge_exec(struct ast_channel *chan, const char *data)
 {
 	int res = 0, volume_adjustments[2];
 	int quiet = 0;
+	int async_delete_task_pushed = 0;
 	char *parse;
 	const char *b_profile_name = NULL;
 	const char *u_profile_name = NULL;
@@ -2315,7 +2381,11 @@ static int confbridge_exec(struct ast_channel *chan, const char *data)
 	if (!quiet &&
 		(ast_test_flag(&user.u_profile, USER_OPT_ANNOUNCE_JOIN_LEAVE) ||
 		(ast_test_flag(&user.u_profile, USER_OPT_ANNOUNCE_JOIN_LEAVE_REVIEW)))) {
-		conf_rec_name(&user, args.conf_name);
+		if (conf_rec_name(&user, args.conf_name)) {
+			pbx_builtin_setvar_helper(chan, "CONFBRIDGE_RESULT", "FAILED");
+			res = -1; /* Hangup during name recording */
+			goto confbridge_cleanup;
+		}
 	}
 
 	/* menu name */
@@ -2371,21 +2441,12 @@ static int confbridge_exec(struct ast_channel *chan, const char *data)
 		user.tech_args.drop_silence = 1;
 	}
 
-	if (ast_test_flag(&user.u_profile, USER_OPT_JITTERBUFFER)) {
-		char *func_jb;
-		if ((func_jb = ast_module_helper("", "func_jitterbuffer", 0, 0, 0, 0))) {
-			ast_free(func_jb);
-			ast_func_write(chan, "JITTERBUFFER(adaptive)", "default");
-		}
+	if (ast_test_flag(&user.u_profile, USER_OPT_JITTERBUFFER) && ast_module_check("func_jitterbuffer.so")) {
+		ast_func_write(chan, "JITTERBUFFER(adaptive)", "default");
 	}
 
-	if (ast_test_flag(&user.u_profile, USER_OPT_DENOISE)) {
-		char *mod_speex;
-		/* Reduce background noise from each participant */
-		if ((mod_speex = ast_module_helper("", "codec_speex", 0, 0, 0, 0))) {
-			ast_free(mod_speex);
-			ast_func_write(chan, "DENOISE(rx)", "on");
-		}
+	if (ast_test_flag(&user.u_profile, USER_OPT_DENOISE) && ast_module_check("codec_speex.so")) {
+		ast_func_write(chan, "DENOISE(rx)", "on");
 	}
 
 	/* if this user has a intro, play it before entering */
@@ -2473,6 +2534,7 @@ static int confbridge_exec(struct ast_channel *chan, const char *data)
 		async_play_sound_file(conference,
 			conf_get_sound(CONF_SOUND_HAS_LEFT, conference->b_profile.sounds), NULL);
 		async_delete_name_rec(conference, user.name_rec_location);
+		async_delete_task_pushed = 1;
 	}
 
 	/* play the leave sound */
@@ -2501,6 +2563,9 @@ static int confbridge_exec(struct ast_channel *chan, const char *data)
 	}
 
 confbridge_cleanup:
+	if (!async_delete_task_pushed && !ast_strlen_zero(user.name_rec_location)) {
+		ast_filedelete(user.name_rec_location, NULL);
+	}
 	ast_bridge_features_cleanup(&user.features);
 	conf_bridge_profile_destroy(&user.b_profile);
 	return res;
@@ -2665,17 +2730,23 @@ static int action_kick_last(struct confbridge_conference *conference,
 	}
 
 	ao2_lock(conference);
-	if (((last_user = AST_LIST_LAST(&conference->active_list)) == user)
-		|| (ast_test_flag(&last_user->u_profile, USER_OPT_ADMIN))) {
+	last_user = AST_LIST_LAST(&conference->active_list);
+	if (!last_user) {
+		ao2_unlock(conference);
+		return 0;
+	}
+
+	if (last_user == user || ast_test_flag(&last_user->u_profile, USER_OPT_ADMIN)) {
 		ao2_unlock(conference);
 		play_file(bridge_channel, NULL,
 			conf_get_sound(CONF_SOUND_ERROR_MENU, conference->b_profile.sounds));
-	} else if (last_user && !last_user->kicked) {
+	} else if (!last_user->kicked) {
 		last_user->kicked = 1;
 		pbx_builtin_setvar_helper(last_user->chan, "CONFBRIDGE_RESULT", "KICKED");
 		ast_bridge_remove(conference->bridge, last_user->chan);
 		ao2_unlock(conference);
 	}
+
 	return 0;
 }
 
@@ -3436,35 +3507,52 @@ static struct ast_custom_function confbridge_info_function = {
 	.read = func_confbridge_info,
 };
 
-static void action_confbridgelist_item(struct mansession *s, const char *id_text, struct confbridge_conference *conference, struct confbridge_user *user, int waiting)
+static int action_confbridgelist_item(struct mansession *s, const char *id_text, struct confbridge_conference *conference, struct confbridge_user *user, int waiting)
 {
+	struct ast_channel_snapshot *snapshot;
+	struct ast_str *snap_str;
+
+	snapshot = ast_channel_snapshot_get_latest(ast_channel_uniqueid(user->chan));
+	if (!snapshot) {
+		return 0;
+	}
+
+	snap_str = ast_manager_build_channel_state_string(snapshot);
+	if (!snap_str) {
+		ao2_ref(snapshot, -1);
+		return 0;
+	}
+
 	astman_append(s,
 		"Event: ConfbridgeList\r\n"
 		"%s"
 		"Conference: %s\r\n"
-		"CallerIDNum: %s\r\n"
-		"CallerIDName: %s\r\n"
-		"Channel: %s\r\n"
 		"Admin: %s\r\n"
 		"MarkedUser: %s\r\n"
 		"WaitMarked: %s\r\n"
 		"EndMarked: %s\r\n"
 		"Waiting: %s\r\n"
 		"Muted: %s\r\n"
+		"Talking: %s\r\n"
 		"AnsweredTime: %d\r\n"
+		"%s"
 		"\r\n",
 		id_text,
 		conference->name,
-		S_COR(ast_channel_caller(user->chan)->id.number.valid, ast_channel_caller(user->chan)->id.number.str, "<unknown>"),
-		S_COR(ast_channel_caller(user->chan)->id.name.valid, ast_channel_caller(user->chan)->id.name.str, "<no name>"),
-		ast_channel_name(user->chan),
-		ast_test_flag(&user->u_profile, USER_OPT_ADMIN) ? "Yes" : "No",
-		ast_test_flag(&user->u_profile, USER_OPT_MARKEDUSER) ? "Yes" : "No",
-		ast_test_flag(&user->u_profile, USER_OPT_WAITMARKED) ? "Yes" : "No",
-		ast_test_flag(&user->u_profile, USER_OPT_ENDMARKED) ? "Yes" : "No",
-		waiting ? "Yes" : "No",
-		user->muted ? "Yes" : "No",
-		ast_channel_get_up_time(user->chan));
+		AST_YESNO(ast_test_flag(&user->u_profile, USER_OPT_ADMIN)),
+		AST_YESNO(ast_test_flag(&user->u_profile, USER_OPT_MARKEDUSER)),
+		AST_YESNO(ast_test_flag(&user->u_profile, USER_OPT_WAITMARKED)),
+		AST_YESNO(ast_test_flag(&user->u_profile, USER_OPT_ENDMARKED)),
+		AST_YESNO(waiting),
+		AST_YESNO(user->muted),
+		AST_YESNO(user->talking),
+		ast_channel_get_up_time(user->chan),
+		ast_str_buffer(snap_str));
+
+	ast_free(snap_str);
+	ao2_ref(snapshot, -1);
+
+	return 1;
 }
 
 static int action_confbridgelist(struct mansession *s, const struct message *m)
@@ -3498,12 +3586,10 @@ static int action_confbridgelist(struct mansession *s, const struct message *m)
 
 	ao2_lock(conference);
 	AST_LIST_TRAVERSE(&conference->active_list, user, list) {
-		total++;
-		action_confbridgelist_item(s, id_text, conference, user, 0);
+		total += action_confbridgelist_item(s, id_text, conference, user, 0);
 	}
 	AST_LIST_TRAVERSE(&conference->waiting_list, user, list) {
-		total++;
-		action_confbridgelist_item(s, id_text, conference, user, 1);
+		total += action_confbridgelist_item(s, id_text, conference, user, 1);
 	}
 	ao2_unlock(conference);
 	ao2_ref(conference, -1);
@@ -4007,8 +4093,9 @@ static int load_module(void)
 	}
 
 	/* Create a container to hold the conference bridges */
-	conference_bridges = ao2_container_alloc(CONFERENCE_BRIDGE_BUCKETS,
-		conference_bridge_hash_cb, conference_bridge_cmp_cb);
+	conference_bridges = ao2_container_alloc_hash(AO2_ALLOC_OPT_LOCK_MUTEX, 0,
+		CONFERENCE_BRIDGE_BUCKETS,
+		conference_bridge_hash_cb, NULL, conference_bridge_cmp_cb);
 	if (!conference_bridges) {
 		unload_module();
 		return AST_MODULE_LOAD_DECLINE;

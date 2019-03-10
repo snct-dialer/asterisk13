@@ -114,6 +114,8 @@ enum ast_rtp_property {
 	AST_RTP_PROPERTY_STUN,
 	/*! Enable RTCP support */
 	AST_RTP_PROPERTY_RTCP,
+	/*! Enable Asymmetric RTP Codecs */
+	AST_RTP_PROPERTY_ASYMMETRIC_CODEC,
 
 	/*!
 	 * \brief Maximum number of RTP properties supported
@@ -1346,6 +1348,16 @@ int ast_rtp_codecs_payloads_set_rtpmap_type_rate(struct ast_rtp_codecs *codecs, 
 void ast_rtp_codecs_payloads_unset(struct ast_rtp_codecs *codecs, struct ast_rtp_instance *instance, int payload);
 
 /*!
+ * \brief Determine the type of RTP stream media from the codecs mapped.
+ * \since 13.19.0
+ *
+ * \param codecs Codecs structure to look in
+ *
+ * \return Media type or AST_MEDIA_TYPE_UNKNOWN if no codecs mapped.
+ */
+enum ast_media_type ast_rtp_codecs_get_stream_type(struct ast_rtp_codecs *codecs);
+
+/*!
  * \brief Retrieve payload information by payload
  *
  * \param codecs Codecs structure to look in
@@ -1487,7 +1499,7 @@ int ast_rtp_codecs_payload_code(struct ast_rtp_codecs *codecs, int asterisk_form
  * Example usage:
  *
  * \code
- * int payload = ast_rtp_codecs_payload_code(&codecs, 0);
+ * int payload = ast_rtp_codecs_find_payload_code(&codecs, 0);
  * \endcode
  *
  * This looks for the numerical payload for ULAW in the codecs structure.

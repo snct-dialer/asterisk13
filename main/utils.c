@@ -196,7 +196,9 @@ static int gethostbyname_r (const char *name, struct hostent *ret, char *buf,
 */
 struct hostent *ast_gethostbyname(const char *host, struct ast_hostent *hp)
 {
+#ifndef HAVE_GETHOSTBYNAME_R_5
 	int res;
+#endif
 	int herrno;
 	int dots = 0;
 	const char *s;
@@ -206,7 +208,6 @@ struct hostent *ast_gethostbyname(const char *host, struct ast_hostent *hp)
 	   integers, we break with tradition and refuse to look up a
 	   pure integer */
 	s = host;
-	res = 0;
 	while (s && *s) {
 		if (*s == '.')
 			dots++;
@@ -964,7 +965,7 @@ static const char *locktype2str(enum ast_lock_type type)
 #ifdef HAVE_BKTR
 static void append_backtrace_information(struct ast_str **str, struct ast_bt *bt)
 {
-	char **symbols;
+	struct ast_vector_string *symbols;
 	int num_frames;
 
 	if (!bt) {
@@ -978,11 +979,11 @@ static void append_backtrace_information(struct ast_str **str, struct ast_bt *bt
 	if ((symbols = ast_bt_get_symbols(bt->addresses, num_frames))) {
 		int frame_iterator;
 
-		for (frame_iterator = 0; frame_iterator < num_frames; ++frame_iterator) {
-			ast_str_append(str, 0, "\t%s\n", symbols[frame_iterator]);
+		for (frame_iterator = 1; frame_iterator < AST_VECTOR_SIZE(symbols); ++frame_iterator) {
+			ast_str_append(str, 0, "\t%s\n", AST_VECTOR_GET(symbols, frame_iterator));
 		}
 
-		ast_std_free(symbols);
+		ast_bt_free_symbols(symbols);
 	} else {
 		ast_str_append(str, 0, "\tCouldn't retrieve backtrace symbols\n");
 	}
@@ -1530,7 +1531,7 @@ char *ast_strsep(char **iss, const char sep, uint32_t flags)
 	int found = 0;
 	char stack[8];
 
-	if (iss == NULL || *iss == '\0') {
+	if (ast_strlen_zero(st)) {
 		return NULL;
 	}
 
@@ -2389,7 +2390,13 @@ int _ast_asprintf(char **ret, const char *file, int lineno, const char *func, co
 	va_list ap;
 
 	va_start(ap, fmt);
-	if ((res = vasprintf(ret, fmt, ap)) == -1) {
+	res = vasprintf(ret, fmt, ap);
+	if (res < 0) {
+		/*
+		 * *ret is undefined so set to NULL to ensure it is
+		 * initialized to something useful.
+		 */
+		*ret = NULL;
 		MALLOC_FAILURE_MSG;
 	}
 	va_end(ap);
@@ -2499,7 +2506,7 @@ char *ast_eid_to_str(char *s, int maxlen, struct ast_eid *eid)
 	return os;
 }
 
-#if defined(__OpenBSD__) || defined(__NetBSD__) || defined(__FreeBSD__) || defined(__Darwin__)
+#if defined(__OpenBSD__) || defined(__NetBSD__) || defined(__FreeBSD__) || defined(__DragonFly__) || defined(__Darwin__)
 #include <ifaddrs.h>
 #include <net/if_dl.h>
 
@@ -2561,7 +2568,6 @@ void ast_set_default_eid(struct ast_eid *eid)
 {
 	int s;
 	int x;
-	int res = 0;
 	struct lifreq *ifr = NULL;
 	struct lifnum ifn;
 	struct lifconf ifc;
@@ -2658,7 +2664,7 @@ void ast_set_default_eid(struct ast_eid *eid)
 	unsigned char full_mac[6]  = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 
 	s = socket(AF_INET, SOCK_STREAM, 0);
-	if (s <= 0) {
+	if (s < 0) {
 		ast_log(LOG_WARNING, "Unable to open socket for seeding global EID. "
 			"You will have to set it manually.\n");
 		return;
@@ -2791,4 +2797,117 @@ int ast_compare_versions(const char *version1, const char *version2)
 		return res;
 	}
 	return extra[0] - extra[1];
+}
+
+int __ast_fd_set_flags(int fd, int flags, enum ast_fd_flag_operation op,
+	const char *file, int lineno, const char *function)
+{
+	int f;
+
+	f = fcntl(fd, F_GETFL);
+	if (f == -1) {
+		ast_log(__LOG_ERROR, file, lineno, function,
+			"Failed to get fcntl() flags for file descriptor: %s\n", strerror(errno));
+		return -1;
+	}
+
+	switch (op) {
+	case AST_FD_FLAG_SET:
+		if ((f & flags) == flags) {
+			/* There is nothing to set */
+			return 0;
+		}
+		f |= flags;
+		break;
+	case AST_FD_FLAG_CLEAR:
+		if (!(f & flags)) {
+			/* There is nothing to clear */
+			return 0;
+		}
+		f &= ~flags;
+		break;
+	default:
+		ast_assert(0);
+		break;
+	}
+
+	f = fcntl(fd, F_SETFL, f);
+	if (f == -1) {
+		ast_log(__LOG_ERROR, file, lineno, function,
+			"Failed to set fcntl() flags for file descriptor: %s\n", strerror(errno));
+		return -1;
+	}
+
+	return 0;
+}
+
+#ifndef HAVE_SOCK_NONBLOCK
+int ast_socket_nonblock(int domain, int type, int protocol)
+{
+	int s = socket(domain, type, protocol);
+	if (s < 0) {
+		return -1;
+	}
+
+	if (ast_fd_set_flags(s, O_NONBLOCK)) {
+		close(s);
+		return -1;
+	}
+
+	return s;
+}
+#endif
+
+#ifndef HAVE_PIPE2
+int ast_pipe_nonblock(int filedes[2])
+{
+	int p = pipe(filedes);
+	if (p < 0) {
+		return -1;
+	}
+
+	if (ast_fd_set_flags(filedes[0], O_NONBLOCK)
+	   || ast_fd_set_flags(filedes[1], O_NONBLOCK)) {
+		close(filedes[0]);
+		close(filedes[1]);
+		return -1;
+	}
+
+	return 0;
+}
+#endif
+
+/*!
+ * \brief A thread local indicating whether the current thread is a user interface.
+ */
+AST_THREADSTORAGE(thread_user_interface_tl);
+
+int ast_thread_user_interface_set(int is_user_interface)
+{
+	int *thread_user_interface;
+
+	thread_user_interface = ast_threadstorage_get(
+		&thread_user_interface_tl, sizeof(*thread_user_interface));
+	if (thread_user_interface == NULL) {
+		ast_log(LOG_ERROR, "Error setting user interface status for current thread\n");
+		return -1;
+	}
+
+	*thread_user_interface = !!is_user_interface;
+	return 0;
+}
+
+int ast_thread_is_user_interface(void)
+{
+	int *thread_user_interface;
+
+	thread_user_interface = ast_threadstorage_get(
+		&thread_user_interface_tl, sizeof(*thread_user_interface));
+	if (thread_user_interface == NULL) {
+		ast_log(LOG_ERROR, "Error checking thread's user interface status\n");
+		/* On error, assume that we are not a user interface thread */
+		return 0;
+	}
+
+	return *thread_user_interface;
 }

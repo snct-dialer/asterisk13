@@ -291,8 +291,8 @@ static struct aco_type global_option = {
 	.type = ACO_GLOBAL,
 	.name = "globals",
 	.item_offset = offsetof(struct parking_config, global),
-	.category_match = ACO_WHITELIST,
-	.category = "^general$",
+	.category_match = ACO_WHITELIST_EXACT,
+	.category = "general",
 };
 
 struct aco_type *global_options[] = ACO_TYPES(&global_option);
@@ -300,8 +300,8 @@ struct aco_type *global_options[] = ACO_TYPES(&global_option);
 static struct aco_type parking_lot_type = {
 	.type = ACO_ITEM,
 	.name = "parking_lot",
-	.category_match = ACO_BLACKLIST,
-	.category = "^(general)$",
+	.category_match = ACO_BLACKLIST_EXACT,
+	.category = "general",
 	.item_alloc = parking_lot_cfg_alloc,
 	.item_find = named_item_find,
 	.item_offset = offsetof(struct parking_config, parking_lots),
@@ -387,7 +387,9 @@ static void *parking_config_alloc(void)
 		return NULL;
 	}
 
-	if (!(cfg->parking_lots = ao2_container_alloc(37, parking_lot_cfg_hash_fn, parking_lot_cfg_cmp_fn))) {
+	cfg->parking_lots = ao2_container_alloc_hash(AO2_ALLOC_OPT_LOCK_MUTEX, 0, 37,
+		parking_lot_cfg_hash_fn, NULL, parking_lot_cfg_cmp_fn);
+	if (!cfg->parking_lots) {
 		return NULL;
 	}
 
@@ -1300,4 +1302,5 @@ AST_MODULE_INFO(ASTERISK_GPL_KEY, AST_MODFLAG_LOAD_ORDER, "Call Parking Resource
 	.load = load_module,
 	.unload = unload_module,
 	.reload = reload_module,
+	.load_pri = 0,
 );

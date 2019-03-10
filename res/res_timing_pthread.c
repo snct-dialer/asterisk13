@@ -116,7 +116,6 @@ static struct {
 static void *pthread_timer_open(void)
 {
 	struct pthread_timer *timer;
-	int i;
 
 	if (!(timer = ao2_alloc(sizeof(*timer), pthread_timer_destructor))) {
 		errno = ENOMEM;
@@ -126,17 +125,11 @@ static void *pthread_timer_open(void)
 	timer->pipe[PIPE_READ] = timer->pipe[PIPE_WRITE] = -1;
 	timer->state = TIMER_STATE_IDLE;
 
-	if (pipe(timer->pipe)) {
+	if (ast_pipe_nonblock(timer->pipe)) {
 		ao2_ref(timer, -1);
 		return NULL;
 	}
 
-	for (i = 0; i < ARRAY_LEN(timer->pipe); ++i) {
-		int flags = fcntl(timer->pipe[i], F_GETFL);
-		flags |= O_NONBLOCK;
-		fcntl(timer->pipe[i], F_SETFL, flags);
-	}
-	
 	ao2_lock(pthread_timers);
 	if (!ao2_container_count(pthread_timers)) {
 		ast_mutex_lock(&timing_thread.lock);
@@ -444,8 +437,9 @@ static int init_timing_thread(void)
 
 static int load_module(void)
 {
-	if (!(pthread_timers = ao2_container_alloc(PTHREAD_TIMER_BUCKETS,
-		pthread_timer_hash, pthread_timer_cmp))) {
+	pthread_timers = ao2_container_alloc_hash(AO2_ALLOC_OPT_LOCK_MUTEX, 0,
+		PTHREAD_TIMER_BUCKETS, pthread_timer_hash, NULL, pthread_timer_cmp);
+	if (!pthread_timers) {
 		return AST_MODULE_LOAD_DECLINE;
 	}
 
