@@ -36,32 +36,35 @@
 
 static void rfc3326_use_reason_header(struct ast_sip_session *session, struct pjsip_rx_data *rdata)
 {
-	const pj_str_t str_reason = { "Reason", 6 };
-	pjsip_generic_string_hdr *header = pjsip_msg_find_hdr_by_name(rdata->msg_info.msg, &str_reason, NULL);
-	char buf[20], *cause, *text;
+	static const pj_str_t str_reason = { "Reason", 6 };
+	pjsip_generic_string_hdr *header;
+	char buf[20];
+	char *cause;
+	char *text;
 	int code;
 
-	if (!header) {
-		return;
+	header = pjsip_msg_find_hdr_by_name(rdata->msg_info.msg, &str_reason, NULL);
+	for (; header;
+		header = pjsip_msg_find_hdr_by_name(rdata->msg_info.msg, &str_reason, header->next)) {
+		ast_copy_pj_str(buf, &header->hvalue, sizeof(buf));
+		cause = ast_skip_blanks(buf);
+
+		if (strncasecmp(cause, "Q.850", 5) || !(cause = strstr(cause, "cause="))) {
+			continue;
+		}
+
+		/* If text is present get rid of it */
+		if ((text = strstr(cause, ";"))) {
+			*text = '\0';
+		}
+
+		if (sscanf(cause, "cause=%30d", &code) != 1) {
+			continue;
+		}
+
+		ast_channel_hangupcause_set(session->channel, code & 0x7f);
+		break;
 	}
-
-	ast_copy_pj_str(buf, &header->hvalue, sizeof(buf));
-	cause = ast_skip_blanks(buf);
-
-	if (strncasecmp(cause, "Q.850", 5) || !(cause = strstr(cause, "cause="))) {
-		return;
-	}
-
-	/* If text is present get rid of it */
-	if ((text = strstr(cause, ";"))) {
-		*text = '\0';
-	}
-
-	if (sscanf(cause, "cause=%30d", &code) != 1) {
-		return;
-	}
-
-	ast_channel_hangupcause_set(session->channel, code & 0x7f);
 }
 
 static int rfc3326_incoming_request(struct ast_sip_session *session, struct pjsip_rx_data *rdata)
@@ -92,11 +95,18 @@ static void rfc3326_add_reason_header(struct ast_sip_session *session, struct pj
 {
 	char buf[20];
 
-	snprintf(buf, sizeof(buf), "Q.850;cause=%i", ast_channel_hangupcause(session->channel) & 0x7f);
-	ast_sip_add_header(tdata, "Reason", buf);
-
 	if (ast_channel_hangupcause(session->channel) == AST_CAUSE_ANSWERED_ELSEWHERE) {
 		ast_sip_add_header(tdata, "Reason", "SIP;cause=200;text=\"Call completed elsewhere\"");
+	}
+
+	if (session->endpoint && session->endpoint->suppress_q850_reason_headers) {
+		ast_debug(1, "A Q.850 '%s'(%i) Reason header was suppresed for endpoint '%s'\n",
+			ast_cause2str((ast_channel_hangupcause(session->channel) & 0x7f)),
+			(ast_channel_hangupcause(session->channel) & 0x7f),
+			ast_sorcery_object_get_id(session->endpoint));
+	} else {
+		snprintf(buf, sizeof(buf), "Q.850;cause=%i", ast_channel_hangupcause(session->channel) & 0x7f);
+		ast_sip_add_header(tdata, "Reason", buf);
 	}
 }
 

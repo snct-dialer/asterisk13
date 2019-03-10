@@ -28,6 +28,7 @@
 
 /*** MODULEINFO
 	<depend>res_odbc</depend>
+	<depend>generic_odbc</depend>
 	<support_level>core</support_level>
  ***/
 
@@ -823,7 +824,7 @@ static int unload_module(void)
 	free_config();
 	AST_RWLIST_UNLOCK(&odbc_tables);
 	AST_RWLIST_HEAD_DESTROY(&odbc_tables);
-        
+
 	return 0;
 }
 
@@ -858,11 +859,10 @@ static int reload(void)
 	return AST_MODULE_LOAD_SUCCESS;
 }
 
-AST_MODULE_INFO(ASTERISK_GPL_KEY, AST_MODFLAG_LOAD_ORDER, ODBC_BACKEND_NAME,
+AST_MODULE_INFO(ASTERISK_GPL_KEY, AST_MODFLAG_LOAD_ORDER, "ODBC CEL backend",
 	.support_level = AST_MODULE_SUPPORT_CORE,
 	.load = load_module,
 	.unload = unload_module,
 	.reload = reload,
 	.load_pri = AST_MODPRI_CDR_DRIVER,
 );
-

@@ -25,6 +25,10 @@
 	<support_level>core</support_level>
  ***/
 
+/* This reduces the size of lock structures within astobj2 objects when
+ * DEBUG_THREADS is not defined. */
+#define DEBUG_THREADS_LOOSE_ABI
+
 #include "asterisk.h"
 
 ASTERISK_FILE_VERSION(__FILE__, "$Revision$")
@@ -50,20 +54,21 @@ static FILE *ref_log;
  * The magic number is used for consistency check.
  */
 struct __priv_data {
-	int ref_counter;
 	ao2_destructor_fn destructor_fn;
 #if defined(AO2_DEBUG)
 	/*! User data size for stats */
 	size_t data_size;
 #endif
+	/*! Number of references held for this object */
+	int ref_counter;
 	/*! The ao2 object option flags */
-	uint32_t options;
+	uint32_t options:2;
 	/*! magic number.  This is used to verify that a pointer passed in is a
 	 *  valid astobj2 */
-	uint32_t magic;
+	uint32_t magic:30;
 };
 
-#define	AO2_MAGIC	0xa570b123
+#define	AO2_MAGIC	0x3a70b123
 
 /*!
  * What an astobj2 object looks like: fixed-size private data
@@ -583,8 +588,8 @@ static void *internal_ao2_alloc(size_t data_size, ao2_destructor_fn destructor_f
 	}
 
 	/* Initialize common ao2 values. */
-	obj->priv_data.ref_counter = 1;
 	obj->priv_data.destructor_fn = destructor_fn;	/* can be NULL */
+	obj->priv_data.ref_counter = 1;
 	obj->priv_data.options = options;
 	obj->priv_data.magic = AO2_MAGIC;
 
@@ -887,16 +892,17 @@ int astobj2_init(void)
 	}
 #endif
 
+	ast_register_cleanup(astobj2_cleanup);
+
 	if (container_init() != 0) {
 		fclose(ref_log);
+		ref_log = NULL;
 		return -1;
 	}
 
 #if defined(AO2_DEBUG)
 	ast_cli_register_multiple(cli_astobj2, ARRAY_LEN(cli_astobj2));
 #endif	/* defined(AO2_DEBUG) */
-
-	ast_register_cleanup(astobj2_cleanup);
 
 	return 0;
 }

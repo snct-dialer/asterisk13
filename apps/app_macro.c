@@ -21,7 +21,7 @@
  * \brief Dial plan macro Implementation
  *
  * \author Mark Spencer <markster@digium.com>
- * 
+ *
  * \ingroup applications
  */
 
@@ -38,6 +38,7 @@ ASTERISK_FILE_VERSION(__FILE__, "$Revision$")
 #include "asterisk/channel.h"
 #include "asterisk/pbx.h"
 #include "asterisk/module.h"
+#include "asterisk/extconf.h"
 #include "asterisk/config.h"
 #include "asterisk/utils.h"
 #include "asterisk/lock.h"
@@ -187,11 +188,20 @@ static void macro_fixup(void *data, struct ast_channel *old_chan, struct ast_cha
 	}
 }
 
-static struct ast_exten *find_matching_priority(struct ast_context *c, const char *exten, int priority, const char *callerid)
+static struct ast_exten *find_matching_priority(struct ast_context *c, const char *exten,
+	int priority, const char *callerid, int iter, int *had_error)
 {
 	struct ast_exten *e;
 	struct ast_include *i;
 	struct ast_context *c2;
+
+	if (iter >= AST_PBX_MAX_STACK) {
+		if (!(*had_error)) {
+			*had_error = 1;
+			ast_log(LOG_ERROR, "Potential infinite loop detected, will not recurse further.\n");
+		}
+		return NULL;
+	}
 
 	for (e=ast_walk_context_extensions(c, NULL); e; e=ast_walk_context_extensions(c, e)) {
 		if (ast_extension_match(ast_get_extension_name(e), exten)) {
@@ -213,7 +223,7 @@ static struct ast_exten *find_matching_priority(struct ast_context *c, const cha
 	for (i=ast_walk_context_includes(c, NULL); i; i=ast_walk_context_includes(c, i)) {
 		for (c2=ast_walk_contexts(NULL); c2; c2=ast_walk_contexts(c2)) {
 			if (!strcmp(ast_get_context_name(c2), ast_get_include_name(i))) {
-				e = find_matching_priority(c2, exten, priority, callerid);
+				e = find_matching_priority(c2, exten, priority, callerid, iter + 1, had_error);
 				if (e)
 					return e;
 			}
@@ -250,6 +260,7 @@ static int _macro_exec(struct ast_channel *chan, const char *data, int exclusive
 	char *save_macro_offset;
 	int save_in_subroutine;
 	struct ast_datastore *macro_store = ast_channel_datastore_find(chan, &macro_ds_info, NULL);
+	int had_infinite_include_error = 0;
 
 	if (ast_strlen_zero(data)) {
 		ast_log(LOG_WARNING, "Macro() requires arguments. See \"core show application macro\" for help.\n");
@@ -274,16 +285,16 @@ static int _macro_exec(struct ast_channel *chan, const char *data, int exclusive
 	if ((s = pbx_builtin_getvar_helper(chan, "MACRO_RECURSION"))) {
 		sscanf(s, "%30d", &maxdepth);
 	}
-	
+
 	/* Count how many levels deep the rabbit hole goes */
 	if ((s = pbx_builtin_getvar_helper(chan, "MACRO_DEPTH"))) {
 		sscanf(s, "%30d", &depth);
 	}
-	
+
 	/* Used for detecting whether to return when a Macro is called from another Macro after hangup */
 	if (strcmp(ast_channel_exten(chan), "h") == 0)
 		pbx_builtin_setvar_helper(chan, "MACRO_IN_HANGUP", "1");
-	
+
 	if ((inhangupc = pbx_builtin_getvar_helper(chan, "MACRO_IN_HANGUP"))) {
 		sscanf(inhangupc, "%30d", &inhangup);
 	}
@@ -371,7 +382,7 @@ static int _macro_exec(struct ast_channel *chan, const char *data, int exclusive
 	save_macro_priority = ast_strdup(pbx_builtin_getvar_helper(chan, "MACRO_PRIORITY"));
 	snprintf(pc, sizeof(pc), "%d", oldpriority);
 	pbx_builtin_setvar_helper(chan, "MACRO_PRIORITY", pc);
-  
+
 	save_macro_offset = ast_strdup(pbx_builtin_getvar_helper(chan, "MACRO_OFFSET"));
 	pbx_builtin_setvar_helper(chan, "MACRO_OFFSET", NULL);
 
@@ -418,7 +429,9 @@ static int _macro_exec(struct ast_channel *chan, const char *data, int exclusive
 						ast_log(LOG_WARNING, "Unable to lock context?\n");
 					} else {
 						e = find_matching_priority(c, ast_channel_exten(chan), ast_channel_priority(chan),
-							S_COR(ast_channel_caller(chan)->id.number.valid, ast_channel_caller(chan)->id.number.str, NULL));
+							S_COR(ast_channel_caller(chan)->id.number.valid,
+							ast_channel_caller(chan)->id.number.str, NULL),
+							0, &had_infinite_include_error);
 						if (e) { /* This will only be undefined for pbx_realtime, which is majorly broken. */
 							ast_copy_string(runningapp, ast_get_extension_app(e), sizeof(runningapp));
 							ast_copy_string(runningdata, ast_get_extension_app_data(e), sizeof(runningdata));
@@ -612,7 +625,7 @@ static int macroexclusive_exec(struct ast_channel *chan, const char *data)
 	return _macro_exec(chan, data, 1);
 }
 
-static int macroif_exec(struct ast_channel *chan, const char *data) 
+static int macroif_exec(struct ast_channel *chan, const char *data)
 {
 	char *expr = NULL, *label_a = NULL, *label_b = NULL;
 	int res = 0;
@@ -628,14 +641,14 @@ static int macroif_exec(struct ast_channel *chan, const char *data)
 		}
 		if (pbx_checkcondition(expr))
 			res = macro_exec(chan, label_a);
-		else if (label_b) 
+		else if (label_b)
 			res = macro_exec(chan, label_b);
 	} else
 		ast_log(LOG_WARNING, "Invalid Syntax.\n");
 
 	return res;
 }
-			
+
 static int macro_exit_exec(struct ast_channel *chan, const char *data)
 {
 	return MACRO_EXIT_RESULT;

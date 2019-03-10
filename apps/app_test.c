@@ -23,7 +23,7 @@
  *
  * \author Mark Spencer <markster@digium.com>
  * \author Russell Bryant <russelb@clemson.edu>
- * 
+ *
  * \ingroup applications
  */
 
@@ -332,7 +332,6 @@ static int testserver_exec(struct ast_channel *chan, const char *data)
 {
 	int res = 0;
 	char testid[80]="";
-	char fn[80];
 	FILE *f;
 	if (ast_channel_state(chan) != AST_STATE_UP)
 		res = ast_answer(chan);
@@ -359,6 +358,8 @@ static int testserver_exec(struct ast_channel *chan, const char *data)
 	if (strchr(testid, '/'))
 		res = -1;
 	if ((res >=0) && (!ast_strlen_zero(testid))) {
+		char fn[PATH_MAX];
+
 		/* Got a Test ID!  Whoo hoo! */
 		/* Make the directory to hold the test results in case it's not there */
 		snprintf(fn, sizeof(fn), "%s/testresults", ast_config_AST_LOG_DIR);
@@ -499,4 +500,3 @@ static int load_module(void)
 }
 
 AST_MODULE_INFO_STANDARD_EXTENDED(ASTERISK_GPL_KEY, "Interface Test Application");
-

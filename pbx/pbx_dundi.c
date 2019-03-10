@@ -32,6 +32,7 @@
 
 /*** MODULEINFO
 	<depend>zlib</depend>
+	<use type="module">res_crypto</use>
 	<use type="external">crypto</use>
 	<support_level>extended</support_level>
  ***/
@@ -99,8 +100,8 @@ ASTERISK_FILE_VERSION(__FILE__, "$Revision$")
 			in the DUNDi lookup. If no results were found, the result will be blank.</para>
 		</description>
 	</function>
-			
-		
+
+
 	<function name="DUNDIQUERY" language="en_US">
 		<synopsis>
 			Initiate a DUNDi query.
@@ -562,7 +563,7 @@ static int get_mapping_weight(struct dundi_mapping *map, struct varshead *headp)
 	if (map->weightstr) {
 		if (headp) {
 			pbx_substitute_variables_varshead(headp, map->weightstr, buf, sizeof(buf) - 1);
-		} else {                
+		} else {
 			pbx_substitute_variables_helper(NULL, map->weightstr, buf, sizeof(buf) - 1);
 		}
 
@@ -1239,7 +1240,6 @@ static int cache_lookup_internal(time_t now, struct dundi_request *req, char *ke
 
 static int cache_lookup(struct dundi_request *req, dundi_eid *peer_eid, uint32_t crc, int *lowexpiration)
 {
-	char key[256];
 	char eid_str[20];
 	char eidroot_str[20];
 	time_t now;
@@ -1247,6 +1247,8 @@ static int cache_lookup(struct dundi_request *req, dundi_eid *peer_eid, uint32_t
 	int res2=0;
 	char eid_str_full[20];
 	char tmp[256]="";
+	/* Enough space for largest value that can be stored in key. */
+	char key[sizeof(eid_str) + sizeof(tmp) + sizeof(req->dcontext) + sizeof(eidroot_str) + sizeof("hint////r")];
 	int x;
 
 	time(&now);
@@ -1318,7 +1320,9 @@ static int do_register_expire(const void *data)
 {
 	struct dundi_peer *peer = (struct dundi_peer *)data;
 	char eid_str[20];
+
 	ast_debug(1, "Register expired for '%s'\n", ast_eid_to_str(eid_str, sizeof(eid_str), &peer->eid));
+	ast_db_del("dundi/dpeers", dundi_eid_to_str_short(eid_str, sizeof(eid_str), &peer->eid));
 	peer->registerexpire = -1;
 	peer->lastms = 0;
 	memset(&peer->addr, 0, sizeof(peer->addr));
@@ -1540,7 +1544,18 @@ static void deep_copy_peer(struct dundi_peer *peer_dst, const struct dundi_peer 
 {
 	struct permission *cur, *perm;
 
-	memcpy(peer_dst, peer_src, sizeof(*peer_dst));
+	*peer_dst = *peer_src;
+	AST_LIST_NEXT(peer_dst, list) = NULL;
+
+	/* Scheduled items cannot go with the copy */
+	peer_dst->registerid = -1;
+	peer_dst->qualifyid = -1;
+	peer_dst->registerexpire = -1;
+
+	/* Transactions and lookup history cannot go with the copy either */
+	peer_dst->regtrans = NULL;
+	peer_dst->qualtrans = NULL;
+	memset(&peer_dst->lookups, 0, sizeof(peer_dst->lookups));
 
 	memset(&peer_dst->permit, 0, sizeof(peer_dst->permit));
 	memset(&peer_dst->include, 0, sizeof(peer_dst->permit));
@@ -2198,7 +2213,6 @@ static void *network_thread(void *ignore)
 	}
 
 	ast_io_remove(io, socket_read_id);
-	netthreadid = AST_PTHREADT_NULL;
 
 	return NULL;
 }
@@ -2233,7 +2247,6 @@ static void *process_clearcache(void *ignore)
 		pthread_testcancel();
 	}
 
-	clearcachethreadid = AST_PTHREADT_NULL;
 	return NULL;
 }
 
@@ -2268,8 +2281,6 @@ static void *process_precache(void *ign)
 		} else
 			sleep(1);
 	}
-
-	precachethreadid = AST_PTHREADT_NULL;
 
 	return NULL;
 }
@@ -2367,8 +2378,7 @@ static char *dundi_flush(struct ast_cli_entry *e, int cmd, struct ast_cli_args *
 		AST_LIST_LOCK(&peers);
 		AST_LIST_TRAVERSE(&peers, p, list) {
 			for (x = 0;x < DUNDI_TIMING_HISTORY; x++) {
-				if (p->lookups[x])
-					ast_free(p->lookups[x]);
+				ast_free(p->lookups[x]);
 				p->lookups[x] = NULL;
 				p->lookuptimes[x] = 0;
 			}
@@ -3180,8 +3190,7 @@ static void destroy_trans(struct dundi_transaction *trans, int fromtimeout)
 					if (!ast_eid_cmp(&trans->them_eid, &peer->eid)) {
 						peer->avgms = 0;
 						cnt = 0;
-						if (peer->lookups[DUNDI_TIMING_HISTORY-1])
-							ast_free(peer->lookups[DUNDI_TIMING_HISTORY-1]);
+						ast_free(peer->lookups[DUNDI_TIMING_HISTORY - 1]);
 						for (x=DUNDI_TIMING_HISTORY-1;x>0;x--) {
 							peer->lookuptimes[x] = peer->lookuptimes[x-1];
 							peer->lookups[x] = peer->lookups[x-1];
@@ -4327,19 +4336,31 @@ static void destroy_permissions(struct permissionlist *permlist)
 
 static void destroy_peer(struct dundi_peer *peer)
 {
+	int idx;
+
+	AST_SCHED_DEL(sched, peer->registerexpire);
 	AST_SCHED_DEL(sched, peer->registerid);
-	if (peer->regtrans)
+	if (peer->regtrans) {
 		destroy_trans(peer->regtrans, 0);
+	}
 	AST_SCHED_DEL(sched, peer->qualifyid);
+	if (peer->qualtrans) {
+		destroy_trans(peer->qualtrans, 0);
+	}
 	destroy_permissions(&peer->permit);
 	destroy_permissions(&peer->include);
+
+	/* Release lookup history */
+	for (idx = 0; idx < ARRAY_LEN(peer->lookups); ++idx) {
+		ast_free(peer->lookups[idx]);
+	}
+
 	ast_free(peer);
 }
 
 static void destroy_map(struct dundi_mapping *map)
 {
-	if (map->weightstr)
-		ast_free(map->weightstr);
+	ast_free(map->weightstr);
 	ast_free(map);
 }
 
@@ -4683,10 +4704,11 @@ static void build_peer(dundi_eid *eid, struct ast_variable *v, int *globalpcmode
 		ast_log(LOG_WARNING, "Peer '%s' is supposed to have permission for some inbound searches but isn't an inbound peer or outbound precache!\n",
 			ast_eid_to_str(eid_str, sizeof(eid_str), &peer->eid));
 	} else {
-		if (needregister) {
-			peer->registerid = ast_sched_add(sched, 2000, do_register, peer);
-		}
 		if (ast_eid_cmp(&peer->eid, &empty_eid)) {
+			/* Schedule any items for explicitly configured peers. */
+			if (needregister) {
+				peer->registerid = ast_sched_add(sched, 2000, do_register, peer);
+			}
 			qualify_peer(peer, 1);
 		}
 	}
@@ -4925,13 +4947,17 @@ static int set_config(char *config_file, struct sockaddr_in* sin, int reload)
 		v = v->next;
 	}
 	AST_LIST_UNLOCK(&peers);
+
 	mark_mappings();
 	v = ast_variable_browse(cfg, "mappings");
-	while(v) {
+	while (v) {
+		AST_LIST_LOCK(&peers);
 		build_mapping(v->name, v->value);
+		AST_LIST_UNLOCK(&peers);
 		v = v->next;
 	}
 	prune_mappings();
+
 	mark_peers();
 	cat = ast_category_browse(cfg, NULL);
 	while(cat) {
@@ -4948,6 +4974,7 @@ static int set_config(char *config_file, struct sockaddr_in* sin, int reload)
 		cat = ast_category_browse(cfg, cat);
 	}
 	prune_peers();
+
 	ast_config_destroy(cfg);
 	load_password();
 	if (globalpcmodel & DUNDI_MODEL_OUTBOUND)
@@ -4957,8 +4984,6 @@ static int set_config(char *config_file, struct sockaddr_in* sin, int reload)
 
 static int unload_module(void)
 {
-	pthread_t previous_netthreadid = netthreadid, previous_precachethreadid = precachethreadid, previous_clearcachethreadid = clearcachethreadid;
-
 	ast_cli_unregister_multiple(cli_dundi, ARRAY_LEN(cli_dundi));
 	ast_unregister_switch(&dundi_switch);
 	ast_custom_function_unregister(&dundi_function);
@@ -4967,27 +4992,40 @@ static int unload_module(void)
 
 	/* Stop all currently running threads */
 	dundi_shutdown = 1;
-	if (previous_netthreadid != AST_PTHREADT_NULL) {
-		pthread_kill(previous_netthreadid, SIGURG);
-		pthread_join(previous_netthreadid, NULL);
+	if (netthreadid != AST_PTHREADT_NULL) {
+		pthread_kill(netthreadid, SIGURG);
+		pthread_join(netthreadid, NULL);
+		netthreadid = AST_PTHREADT_NULL;
 	}
-	if (previous_precachethreadid != AST_PTHREADT_NULL) {
-		pthread_kill(previous_precachethreadid, SIGURG);
-		pthread_join(previous_precachethreadid, NULL);
+	if (precachethreadid != AST_PTHREADT_NULL) {
+		pthread_kill(precachethreadid, SIGURG);
+		pthread_join(precachethreadid, NULL);
+		precachethreadid = AST_PTHREADT_NULL;
 	}
- 	if (previous_clearcachethreadid != AST_PTHREADT_NULL) {
- 		pthread_cancel(previous_clearcachethreadid);
- 		pthread_join(previous_clearcachethreadid, NULL);
+ 	if (clearcachethreadid != AST_PTHREADT_NULL) {
+ 		pthread_cancel(clearcachethreadid);
+ 		pthread_join(clearcachethreadid, NULL);
+		clearcachethreadid = AST_PTHREADT_NULL;
  	}
-
-	close(netsocket);
-	io_context_destroy(io);
-	ast_sched_context_destroy(sched);
 
 	mark_mappings();
 	prune_mappings();
 	mark_peers();
 	prune_peers();
+
+	if (-1 < netsocket) {
+		close(netsocket);
+		netsocket = -1;
+	}
+	if (io) {
+		io_context_destroy(io);
+		io = NULL;
+	}
+
+	if (sched) {
+		ast_sched_context_destroy(sched);
+		sched = NULL;
+	}
 
 	return 0;
 }
@@ -5065,6 +5103,4 @@ AST_MODULE_INFO(ASTERISK_GPL_KEY, AST_MODFLAG_DEFAULT, "Distributed Universal Nu
 		.load = load_module,
 		.unload = unload_module,
 		.reload = reload,
-		.nonoptreq = "res_crypto",
 	       );
-

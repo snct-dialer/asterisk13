@@ -32,7 +32,7 @@ struct ast_format;
 
 /*! \brief Format comparison results */
 enum ast_format_cmp_res {
-	/*! Both formats are equivalent to eachother */
+	/*! Both formats are equivalent to each other */
 	AST_FORMAT_CMP_EQUAL = 0,
 	/*! Both formats are completely different and not the same in any way */
 	AST_FORMAT_CMP_NOT_EQUAL,
@@ -71,7 +71,7 @@ struct ast_format_interface {
 	enum ast_format_cmp_res (* const format_cmp)(const struct ast_format *format1,
 		const struct ast_format *format2);
 
-	/*! 
+	/*!
 	 * \brief Get a format with the joint compatible attributes of both provided formats.
 	 *
 	 * \param format1 The first format
@@ -110,7 +110,7 @@ struct ast_format_interface {
 	struct ast_format *(* const format_parse_sdp_fmtp)(const struct ast_format *format, const char *attributes);
 
 	/*!
-	 * \brief Generate SDP attribute information from an ast_format_attr structure.
+	 * \brief Generate SDP attribute information from an ast_format structure.
 	 *
 	 * \param format The format containing attributes
 	 * \param payload The payload number to place into the fmtp line

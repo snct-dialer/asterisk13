@@ -241,15 +241,16 @@ static int create_rtp(struct ast_sip_session *session, struct ast_sip_session_me
 	}
 
 	ast_rtp_instance_set_prop(session_media->rtp, AST_RTP_PROPERTY_NAT, session->endpoint->media.rtp.symmetric);
+	ast_rtp_instance_set_prop(session_media->rtp, AST_RTP_PROPERTY_ASYMMETRIC_CODEC, session->endpoint->asymmetric_rtp_codec);
 
 	if (!session->endpoint->media.rtp.ice_support && (ice = ast_rtp_instance_get_ice(session_media->rtp))) {
 		ice->stop(session_media->rtp);
 	}
 
-	if (session->endpoint->dtmf == AST_SIP_DTMF_RFC_4733 || session->endpoint->dtmf == AST_SIP_DTMF_AUTO || session->endpoint->dtmf == AST_SIP_DTMF_AUTO_INFO) {
+	if (session->dtmf == AST_SIP_DTMF_RFC_4733 || session->dtmf == AST_SIP_DTMF_AUTO || session->dtmf == AST_SIP_DTMF_AUTO_INFO) {
 		ast_rtp_instance_dtmf_mode_set(session_media->rtp, AST_RTP_DTMF_MODE_RFC2833);
 		ast_rtp_instance_set_prop(session_media->rtp, AST_RTP_PROPERTY_DTMF, 1);
-	} else if (session->endpoint->dtmf == AST_SIP_DTMF_INBAND) {
+	} else if (session->dtmf == AST_SIP_DTMF_INBAND) {
 		ast_rtp_instance_dtmf_mode_set(session_media->rtp, AST_RTP_DTMF_MODE_INBAND);
 	}
 
@@ -332,11 +333,11 @@ static void get_codecs(struct ast_sip_session *session, const struct pjmedia_sdp
 			}
 		}
 	}
-	if (!tel_event && (session->endpoint->dtmf == AST_SIP_DTMF_AUTO)) {
+	if (!tel_event && (session->dtmf == AST_SIP_DTMF_AUTO)) {
 		ast_rtp_instance_dtmf_mode_set(session_media->rtp, AST_RTP_DTMF_MODE_INBAND);
 	}
 
-	if (session->endpoint->dtmf == AST_SIP_DTMF_AUTO_INFO) {
+	if (session->dtmf == AST_SIP_DTMF_AUTO_INFO) {
 		if  (tel_event) {
 			ast_rtp_instance_dtmf_mode_set(session_media->rtp, AST_RTP_DTMF_MODE_RFC2833);
 		} else {
@@ -440,7 +441,7 @@ static int set_caps(struct ast_sip_session *session, struct ast_sip_session_medi
 			ast_set_write_format(session->channel, ast_channel_writeformat(session->channel));
 		}
 
-		if ( ((session->endpoint->dtmf == AST_SIP_DTMF_AUTO) || (session->endpoint->dtmf == AST_SIP_DTMF_AUTO_INFO) )
+		if ( ((session->dtmf == AST_SIP_DTMF_AUTO) || (session->dtmf == AST_SIP_DTMF_AUTO_INFO) )
 		    && (ast_rtp_instance_dtmf_mode_get(session_media->rtp) == AST_RTP_DTMF_MODE_RFC2833)
 		    && (session->dsp)) {
 			dsp_features = ast_dsp_get_features(session->dsp);
@@ -530,6 +531,10 @@ static void add_ice_to_stream(struct ast_sip_session *session, struct ast_sip_se
 		return;
 	}
 
+	if (!session_media->remote_ice) {
+		return;
+	}
+
 	if ((username = ice->get_ufrag(session_media->rtp))) {
 		attr = pjmedia_sdp_attr_create(pool, "ice-ufrag", pj_cstr(&stmp, username));
 		media->attr[media->attr_count++] = attr;
@@ -575,6 +580,33 @@ static void add_ice_to_stream(struct ast_sip_session *session, struct ast_sip_se
 	ao2_ref(candidates, -1);
 }
 
+/*! \brief Function which checks for ice attributes in an audio stream */
+static void check_ice_support(struct ast_sip_session *session, struct ast_sip_session_media *session_media,
+				   const struct pjmedia_sdp_media *remote_stream)
+{
+	struct ast_rtp_engine_ice *ice;
+	const pjmedia_sdp_attr *attr;
+	unsigned int attr_i;
+
+	if (!session->endpoint->media.rtp.ice_support || !(ice = ast_rtp_instance_get_ice(session_media->rtp))) {
+		session_media->remote_ice = 0;
+		return;
+	}
+
+	/* Find all of the candidates */
+	for (attr_i = 0; attr_i < remote_stream->attr_count; ++attr_i) {
+		attr = remote_stream->attr[attr_i];
+		if (!pj_strcmp2(&attr->name, "candidate")) {
+			session_media->remote_ice = 1;
+			break;
+		}
+	}
+
+	if (attr_i == remote_stream->attr_count) {
+		session_media->remote_ice = 0;
+	}
+}
+
 /*! \brief Function which processes ICE attributes in an audio stream */
 static void process_ice_attributes(struct ast_sip_session *session, struct ast_sip_session_media *session_media,
 				   const struct pjmedia_sdp_session *remote, const struct pjmedia_sdp_media *remote_stream)
@@ -617,7 +649,7 @@ static void process_ice_attributes(struct ast_sip_session *session, struct ast_s
 
 	/* Find all of the candidates */
 	for (attr_i = 0; attr_i < remote_stream->attr_count; ++attr_i) {
-		char foundation[32], transport[32], address[PJ_INET6_ADDRSTRLEN + 1], cand_type[6], relay_address[PJ_INET6_ADDRSTRLEN + 1] = "";
+		char foundation[33], transport[32], address[PJ_INET6_ADDRSTRLEN + 1], cand_type[6], relay_address[PJ_INET6_ADDRSTRLEN + 1] = "";
 		unsigned int port, relay_port = 0;
 		struct ast_rtp_engine_ice_candidate candidate = { 0, };
 
@@ -630,7 +662,7 @@ static void process_ice_attributes(struct ast_sip_session *session, struct ast_s
 
 		ast_copy_pj_str(attr_value, (pj_str_t*)&attr->value, sizeof(attr_value));
 
-		if (sscanf(attr_value, "%31s %30u %31s %30u %46s %30u typ %5s %*s %23s %*s %30u", foundation, &candidate.id, transport,
+		if (sscanf(attr_value, "%32s %30u %31s %30u %46s %30u typ %5s %*s %23s %*s %30u", foundation, &candidate.id, transport,
 			(unsigned *)&candidate.priority, address, &port, cand_type, relay_address, &relay_port) < 7) {
 			/* Candidate did not parse properly */
 			continue;
@@ -1032,6 +1064,9 @@ static int negotiate_incoming_sdp_stream(struct ast_sip_session *session, struct
 		pj_strdup(session->inv_session->pool, &session_media->transport, &stream->desc.transport);
  	}
 
+	/* If ICE support is enabled find all the needed attributes */
+	check_ice_support(session, session_media, stream);
+
 	if (set_caps(session, session_media, stream)) {
 		return 0;
 	}
@@ -1160,12 +1195,13 @@ static int create_outgoing_sdp_stream(struct ast_sip_session *session, struct as
 	pj_str_t stmp;
 	pjmedia_sdp_attr *attr;
 	int index = 0;
-	int noncodec = (session->endpoint->dtmf == AST_SIP_DTMF_RFC_4733 || session->endpoint->dtmf == AST_SIP_DTMF_AUTO || session->endpoint->dtmf == AST_SIP_DTMF_AUTO_INFO) ? AST_RTP_DTMF : 0;
+	int noncodec = (session->dtmf == AST_SIP_DTMF_RFC_4733 || session->dtmf == AST_SIP_DTMF_AUTO || session->dtmf == AST_SIP_DTMF_AUTO_INFO) ? AST_RTP_DTMF : 0;
 	int min_packet_size = 0, max_packet_size = 0;
 	int rtp_code;
 	RAII_VAR(struct ast_format_cap *, caps, NULL, ao2_cleanup);
 	enum ast_media_type media_type = stream_to_media_type(session_media->stream_type);
 	int use_override_prefs = ast_format_cap_count(session->req_caps);
+	pj_sockaddr ip;
 
 	int direct_media_enabled = !ast_sockaddr_isnull(&session_media->direct_media_addr) &&
 		ast_format_cap_count(session->direct_media_cap);
@@ -1222,13 +1258,9 @@ static int create_outgoing_sdp_stream(struct ast_sip_session *session, struct as
 	media->conn->addr_type = STR_IP4;
 	pj_strdup2(pool, &media->conn->addr, hostip);
 
-	if (!ast_strlen_zero(session->endpoint->media.address)) {
-		pj_sockaddr ip;
-
-		if ((pj_sockaddr_parse(pj_AF_UNSPEC(), 0, &media->conn->addr, &ip) == PJ_SUCCESS) &&
-			(ip.addr.sa_family == pj_AF_INET6())) {
-			media->conn->addr_type = STR_IP6;
-		}
+	if ((pj_sockaddr_parse(pj_AF_UNSPEC(), 0, &media->conn->addr, &ip) == PJ_SUCCESS) &&
+		(ip.addr.sa_family == pj_AF_INET6())) {
+		media->conn->addr_type = STR_IP6;
 	}
 
 	ast_rtp_instance_get_local_address(session_media->rtp, &addr);
@@ -1344,8 +1376,8 @@ static int create_outgoing_sdp_stream(struct ast_sip_session *session, struct as
 	attr->name = STR_SENDRECV;
 	media->attr[media->attr_count++] = attr;
 
-	/* If we've got rtcp-mux enabled, just unconditionally offer it in all SDPs */
-	if (session->endpoint->rtcp_mux) {
+	/* If we've got rtcp-mux enabled, add it unless we received an offer without it */
+	if (session->endpoint->rtcp_mux && session_media->remote_rtcp_mux) {
 		attr = pjmedia_sdp_attr_create(pool, "rtcp-mux", NULL);
 		pjmedia_sdp_attr_add(&media->attr_count, media->attr, attr);
 	}
@@ -1505,7 +1537,7 @@ static void change_outgoing_sdp_stream_media_address(pjsip_tx_data *tdata, struc
 {
 	RAII_VAR(struct ast_sip_transport_state *, transport_state, ast_sip_get_transport_state(ast_sorcery_object_get_id(transport)), ao2_cleanup);
 	char host[NI_MAXHOST];
-	struct ast_sockaddr addr = { { 0, } };
+	struct ast_sockaddr our_sdp_addr = { { 0, } };
 
 	/* If the stream has been rejected there will be no connection line */
 	if (!stream->conn || !transport_state) {
@@ -1513,15 +1545,17 @@ static void change_outgoing_sdp_stream_media_address(pjsip_tx_data *tdata, struc
 	}
 
 	ast_copy_pj_str(host, &stream->conn->addr, sizeof(host));
-	ast_sockaddr_parse(&addr, host, PARSE_PORT_FORBID);
+	ast_sockaddr_parse(&our_sdp_addr, host, PARSE_PORT_FORBID);
 
-	/* Is the address within the SDP inside the same network? */
-	if (transport_state->localnet
-		&& ast_apply_ha(transport_state->localnet, &addr) == AST_SENSE_ALLOW) {
+	/* Reversed check here. We don't check the remote endpoint being
+	 * in our local net, but whether our outgoing session IP is
+	 * local. If it is not, we won't do rewriting. No localnet
+	 * configured? Always rewrite. */
+	if (ast_sip_transport_is_nonlocal(transport_state, &our_sdp_addr) && transport_state->localnet) {
 		return;
 	}
-	ast_debug(5, "Setting media address to %s\n", transport->external_media_address);
-	pj_strdup2(tdata->pool, &stream->conn->addr, transport->external_media_address);
+	ast_debug(5, "Setting media address to %s\n", ast_sockaddr_stringify_host(&transport_state->external_media_address));
+	pj_strdup2(tdata->pool, &stream->conn->addr, ast_sockaddr_stringify_host(&transport_state->external_media_address));
 }
 
 /*! \brief Function which stops the RTP instance */

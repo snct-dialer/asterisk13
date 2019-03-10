@@ -188,7 +188,7 @@ void ast_free_ptr(void *ptr)
 static void print_backtrace(struct ast_bt *bt)
 {
 	int i = 0;
-	char **strings;
+	struct ast_vector_string *strings;
 
 	if (!bt) {
 		return;
@@ -196,10 +196,10 @@ static void print_backtrace(struct ast_bt *bt)
 
 	if ((strings = ast_bt_get_symbols(bt->addresses, bt->num_frames))) {
 		astmm_log("Memory allocation backtrace:\n");
-		for (i = 3; i < bt->num_frames - 2; i++) {
-			astmm_log("#%d: [%p] %s\n", i - 3, bt->addresses[i], strings[i]);
+		for (i = 3; i < AST_VECTOR_SIZE(strings) - 2; i++) {
+			astmm_log("#%d: %s\n", i - 3, AST_VECTOR_GET(strings, i));
 		}
-		ast_std_free(strings);
+		ast_bt_free_symbols(strings);
 	}
 }
 
@@ -226,6 +226,8 @@ static void *__ast_alloc_region(size_t size, const enum func_type which, const c
 	struct ast_region *reg;
 	unsigned int *fence;
 	int hash;
+
+	DEBUG_CHAOS_RETURN(DEBUG_CHAOS_ALLOC_CHANCE, NULL);
 
 	if (!(reg = malloc(size + sizeof(*reg) + sizeof(*fence)))) {
 		astmm_log("Memory Allocation Failure - '%d' bytes at %s %s() line %d\n",
@@ -664,7 +666,6 @@ int __ast_vasprintf(char **strp, const char *fmt, va_list ap, const char *file, 
 	size = vsnprintf(&s, 1, fmt, ap2);
 	va_end(ap2);
 	if (!(*strp = __ast_alloc_region(size + 1, FUNC_VASPRINTF, file, lineno, func, 0))) {
-		va_end(ap);
 		return -1;
 	}
 	vsnprintf(*strp, size + 1, fmt, ap);
@@ -1466,7 +1467,7 @@ static void mm_atexit_dump(void)
 	/*
 	 * Put the alloced list back into regions[].
 	 *
-	 * We have do do this because we can get called before all other
+	 * We have do this because we can get called before all other
 	 * threads have terminated.
 	 */
 	mm_atexit_hash_restore(&alloced_atexit);

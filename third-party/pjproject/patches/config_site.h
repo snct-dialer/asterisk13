@@ -20,12 +20,6 @@
  */
 #define PJMEDIA_HAS_SRTP 0
 
-/*
- * Defining PJMEDIA_HAS_WEBRTC_AEC to 0 does NOT disable Asterisk's ability to use
- * webrtc.  It only disables the pjmedia webrtc transport which Asterisk doesn't use.
- */
-#define PJMEDIA_HAS_WEBRTC_AEC 0
-
 #define PJ_HAS_IPV6 1
 #define NDEBUG 1
 #define PJ_MAX_HOSTNAME (256)
@@ -68,7 +62,7 @@
   Enabling it will result in SEGFAULTS when URIs containing escape sequences are encountered.
 */
 #undef PJSIP_UNESCAPE_IN_PLACE
-#define PJSIP_MAX_PKT_LEN			6000
+#define PJSIP_MAX_PKT_LEN			32000
 
 #undef PJ_TODO
 #define PJ_TODO(x)
@@ -82,3 +76,11 @@
 #define	PJMEDIA_MAX_SDP_BANDW   4
 #define	PJMEDIA_MAX_SDP_ATTR   (PJMEDIA_MAX_SDP_FMT*2 + 4)
 #define	PJMEDIA_MAX_SDP_MEDIA   16
+
+/*
+ * Turn off the periodic sending of CRLNCRLN.  Default is on (90 seconds),
+ * which conflicts with the global section's keep_alive_interval option in
+ * pjsip.conf.
+ */
+#define PJSIP_TCP_KEEP_ALIVE_INTERVAL	0
+#define PJSIP_TLS_KEEP_ALIVE_INTERVAL	0

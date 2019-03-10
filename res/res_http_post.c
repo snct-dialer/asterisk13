@@ -17,7 +17,7 @@
  */
 
 /*!
- * \file 
+ * \file
  * \brief HTTP POST upload support for Asterisk HTTP server
  *
  * \author Terry Wilson <twilson@digium.com
@@ -38,7 +38,7 @@ ASTERISK_FILE_VERSION(__FILE__, "$Revision$")
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <gmime/gmime.h>
-#if defined (__OpenBSD__) || defined(__FreeBSD__) || defined(__Darwin__)
+#if defined(__OpenBSD__) || defined(__FreeBSD__) || defined(__DragonFly__) || defined(__NetBSD__) || defined(__Darwin__) || defined(SOLARIS)
 #include <libgen.h>
 #endif
 
@@ -56,6 +56,9 @@ ASTERISK_FILE_VERSION(__FILE__, "$Revision$")
 /* gmime 2.4 provides a newer interface. */
 #ifdef GMIME_TYPE_CONTENT_TYPE
 #define AST_GMIME_VER_24
+#endif
+#if defined(GMIME_MAJOR_VERSION) && (GMIME_MAJOR_VERSION >= 3)
+#define AST_GMIME_VER_30
 #endif
 
 /* just a little structure to hold callback info for gmime */
@@ -86,7 +89,11 @@ static void post_raw(GMimePart *part, const char *post_dir, const char *fn)
 
 	stream = g_mime_stream_fs_new(fd);
 
+#ifdef AST_GMIME_VER_30
+	content = g_mime_part_get_content(part);
+#else
 	content = g_mime_part_get_content_object(part);
+#endif
 	g_mime_data_wrapper_write_to_stream(content, stream);
 	g_mime_stream_flush(stream);
 
@@ -106,10 +113,14 @@ static GMimeMessage *parse_message(FILE *f)
 
 	parser = g_mime_parser_new_with_stream(stream);
 	g_mime_parser_set_respect_content_length(parser, 1);
-	
+
 	g_object_unref(stream);
 
-	message = g_mime_parser_construct_message(parser);
+	message = g_mime_parser_construct_message(parser
+#ifdef AST_GMIME_VER_30
+			, NULL
+#endif
+	);
 
 	g_object_unref(parser);
 
@@ -488,7 +499,11 @@ static int reload(void)
 
 static int load_module(void)
 {
-	g_mime_init(0);
+	g_mime_init(
+#ifndef AST_GMIME_VER_30
+			0
+#endif
+	);
 
 	__ast_http_post_load(0);
 

@@ -54,6 +54,7 @@ AST_THREADSTORAGE(semibuf_buf);
 static PGconn *pgsqlConn = NULL;
 static int version;
 #define has_schema_support	(version > 70300 ? 1 : 0)
+#define USE_BACKSLASH_AS_STRING	(version >= 90100 ? 1 : 0)
 
 #define MAX_DB_OPTION_SIZE 64
 
@@ -419,7 +420,7 @@ static struct columns *find_column(struct tables *t, const char *colname)
 }
 
 #define IS_SQL_LIKE_CLAUSE(x) ((x) && ast_ends_with(x, " LIKE"))
-static char *ESCAPE_CLAUSE = " ESCAPE '\\'";
+#define ESCAPE_CLAUSE (USE_BACKSLASH_AS_STRING ? " ESCAPE '\\'" : " ESCAPE '\\\\'")
 
 static struct ast_variable *realtime_pgsql(const char *database, const char *tablename, const struct ast_variable *fields)
 {
@@ -1249,7 +1250,8 @@ static int require_pgsql(const char *database, const char *tablename, va_list ap
 	struct columns *column;
 	struct tables *table;
 	char *elm;
-	int type, size, res = 0;
+	int type, res = 0;
+	unsigned int size;
 
 	/*
 	 * Ignore database from the extconfig.conf since it was
@@ -1265,7 +1267,7 @@ static int require_pgsql(const char *database, const char *tablename, va_list ap
 
 	while ((elm = va_arg(ap, char *))) {
 		type = va_arg(ap, require_type);
-		size = va_arg(ap, int);
+		size = va_arg(ap, unsigned int);
 		AST_LIST_TRAVERSE(&table->columns, column, list) {
 			if (strcmp(column->name, elm) == 0) {
 				/* Char can hold anything, as long as it is large enough */
@@ -1322,14 +1324,14 @@ static int require_pgsql(const char *database, const char *tablename, va_list ap
 				res = -1;
 			} else {
 				struct ast_str *sql = ast_str_create(100);
-				char fieldtype[15];
+				char fieldtype[10];
 				PGresult *result;
 
 				if (requirements == RQ_CREATECHAR || type == RQ_CHAR) {
 					/* Size is minimum length; make it at least 50% greater,
 					 * just to be sure, because PostgreSQL doesn't support
 					 * resizing columns. */
-					snprintf(fieldtype, sizeof(fieldtype), "CHAR(%d)",
+					snprintf(fieldtype, sizeof(fieldtype), "CHAR(%u)",
 						size < 15 ? size * 2 :
 						(size * 3 / 2 > 255) ? 255 : size * 3 / 2);
 				} else if (type == RQ_INTEGER1 || type == RQ_UINTEGER1 || type == RQ_INTEGER2) {
@@ -1558,16 +1560,16 @@ static int parse_config(int is_reload)
 
 	ast_config_destroy(config);
 
-	if (option_debug) {
+	if (DEBUG_ATLEAST(1)) {
 		if (!ast_strlen_zero(dbhost)) {
-			ast_debug(1, "PostgreSQL RealTime Host: %s\n", dbhost);
-			ast_debug(1, "PostgreSQL RealTime Port: %i\n", dbport);
+			ast_log(LOG_DEBUG, "PostgreSQL RealTime Host: %s\n", dbhost);
+			ast_log(LOG_DEBUG, "PostgreSQL RealTime Port: %i\n", dbport);
 		} else {
-			ast_debug(1, "PostgreSQL RealTime Socket: %s\n", dbsock);
+			ast_log(LOG_DEBUG, "PostgreSQL RealTime Socket: %s\n", dbsock);
 		}
-		ast_debug(1, "PostgreSQL RealTime User: %s\n", dbuser);
-		ast_debug(1, "PostgreSQL RealTime Password: %s\n", dbpass);
-		ast_debug(1, "PostgreSQL RealTime DBName: %s\n", dbname);
+		ast_log(LOG_DEBUG, "PostgreSQL RealTime User: %s\n", dbuser);
+		ast_log(LOG_DEBUG, "PostgreSQL RealTime Password: %s\n", dbpass);
+		ast_log(LOG_DEBUG, "PostgreSQL RealTime DBName: %s\n", dbname);
 	}
 
 	if (!pgsql_reconnect(NULL)) {

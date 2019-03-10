@@ -35,6 +35,7 @@
 
 /*** MODULEINFO
 	<depend>res_odbc</depend>
+	<depend>generic_odbc</depend>
 	<support_level>core</support_level>
  ***/
 
@@ -815,4 +816,3 @@ AST_MODULE_INFO(ASTERISK_GPL_KEY, AST_MODFLAG_LOAD_ORDER, "Adaptive ODBC CDR bac
 	.reload = reload,
 	.load_pri = AST_MODPRI_CDR_DRIVER,
 );
-

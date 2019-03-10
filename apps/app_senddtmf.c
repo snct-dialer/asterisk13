@@ -162,14 +162,14 @@ static int manager_play_dtmf(struct mansession *s, const struct message *m)
 		chan = ast_channel_unref(chan);
 		return 0;
 	}
-	
+
 	if (!ast_strlen_zero(duration) && (sscanf(duration, "%30u", &duration_ms) != 1)) {
 		astman_send_error(s, m, "Could not convert Duration parameter");
 		chan = ast_channel_unref(chan);
 		return 0;
 	}
 
-	ast_senddigit(chan, *digit, duration_ms);
+	ast_senddigit_external(chan, *digit, duration_ms);
 
 	chan = ast_channel_unref(chan);
 

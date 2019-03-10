@@ -73,6 +73,7 @@
 
 /*** MODULEINFO
 	<depend type="module">res_http_websocket</depend>
+	<depend type="module">res_stasis</depend>
 	<support_level>core</support_level>
  ***/
 
@@ -883,7 +884,7 @@ static int ast_ari_callback(struct ast_tcptls_session_instance *ser,
 	RAII_VAR(struct ast_variable *, post_vars, NULL, ast_variables_destroy);
 	struct ast_variable *var;
 	const char *app_name = NULL;
-	RAII_VAR(struct ast_json *, body, ast_json_null(), ast_json_free);
+	RAII_VAR(struct ast_json *, body, ast_json_null(), ast_json_unref);
 	int debug_app = 0;
 
 	if (!response_body) {
@@ -983,9 +984,11 @@ static int ast_ari_callback(struct ast_tcptls_session_instance *ser,
 		struct ast_str *buf = ast_str_create(512);
 		char *str = ast_json_dump_string_format(body, ast_ari_json_format());
 
-		if (!buf) {
+		if (!buf || (body && !str)) {
 			ast_http_request_close_on_completion(ser);
-			ast_http_error(ser, 500, "Server Error", "Out of memory");
+			ast_ari_response_error(&response, 500, "Server Error", "Out of memory");
+			ast_json_free(str);
+			ast_free(buf);
 			goto request_failed;
 		}
 
@@ -997,7 +1000,7 @@ static int ast_ari_callback(struct ast_tcptls_session_instance *ser,
 		for (var = get_params; var; var = var->next) {
 			ast_str_append(&buf, 0, "%s: %s\n", var->name, var->value);
 		}
-		ast_verbose("%sbody:\n%s\n\n", ast_str_buffer(buf), str);
+		ast_verbose("%sbody:\n%s\n\n", ast_str_buffer(buf), S_OR(str, ""));
 		ast_json_free(str);
 		ast_free(buf);
 	}
@@ -1191,6 +1194,5 @@ AST_MODULE_INFO(ASTERISK_GPL_KEY, AST_MODFLAG_GLOBAL_SYMBOLS | AST_MODFLAG_LOAD_
 	.load = load_module,
 	.unload = unload_module,
 	.reload = reload_module,
-	.nonoptreq = "res_http_websocket",
 	.load_pri = AST_MODPRI_APP_DEPEND,
 	);

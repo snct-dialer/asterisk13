@@ -19,6 +19,7 @@
 /*** MODULEINFO
 	<depend>pjproject</depend>
 	<depend>res_pjsip</depend>
+	<use type="module">res_statsd</use>
 	<support_level>core</support_level>
  ***/
 
@@ -358,6 +359,8 @@ struct sip_outbound_registration_client_state {
 	unsigned int auth_attempted:1;
 	/*! \brief The name of the transport to be used for the registration */
 	char *transport_name;
+	/*! \brief The name of the registration sorcery object */
+	char *registration_name;
 };
 
 /*! \brief Outbound registration state information (persists for lifetime that registration should exist) */
@@ -459,7 +462,7 @@ static int line_identify_relationship(void *obj, void *arg, int flags)
 	struct sip_outbound_registration_state *state = obj;
 	pjsip_param *line = arg;
 
-	return !pj_strcmp2(&line->value, state->client_state->line) ? CMP_MATCH | CMP_STOP : 0;
+	return !pj_strcmp2(&line->value, state->client_state->line) ? CMP_MATCH : 0;
 }
 
 static struct pjsip_param *get_uri_option_line(const void *uri)
@@ -509,7 +512,8 @@ static struct ast_sip_endpoint_identifier line_identifier = {
 /*! \brief Helper function which cancels the timer on a client */
 static void cancel_registration(struct sip_outbound_registration_client_state *client_state)
 {
-	if (pj_timer_heap_cancel(pjsip_endpt_get_timer_heap(ast_sip_get_pjsip_endpoint()), &client_state->timer)) {
+	if (pj_timer_heap_cancel_if_active(pjsip_endpt_get_timer_heap(ast_sip_get_pjsip_endpoint()),
+		&client_state->timer, client_state->timer.id)) {
 		/* The timer was successfully cancelled, drop the refcount of client_state */
 		ao2_ref(client_state, -1);
 	}
@@ -559,20 +563,21 @@ static int handle_client_registration(void *data)
 {
 	RAII_VAR(struct sip_outbound_registration_client_state *, client_state, data, ao2_cleanup);
 	pjsip_tx_data *tdata;
-	pjsip_regc_info info;
-	char server_uri[PJSIP_MAX_URL_SIZE];
-	char client_uri[PJSIP_MAX_URL_SIZE];
 
 	if (client_state->status == SIP_REGISTRATION_STOPPED
 		|| pjsip_regc_register(client_state->client, PJ_FALSE, &tdata) != PJ_SUCCESS) {
 		return 0;
 	}
 
-	pjsip_regc_get_info(client_state->client, &info);
-	ast_copy_pj_str(server_uri, &info.server_uri, sizeof(server_uri));
-	ast_copy_pj_str(client_uri, &info.client_uri, sizeof(client_uri));
-	ast_debug(1, "Outbound REGISTER attempt %u to '%s' with client '%s'\n",
-		client_state->retries + 1, server_uri, client_uri);
+	if (DEBUG_ATLEAST(1)) {
+		pjsip_regc_info info;
+
+		pjsip_regc_get_info(client_state->client, &info);
+		ast_log(LOG_DEBUG, "Outbound REGISTER attempt %u to '%.*s' with client '%.*s'\n",
+			client_state->retries + 1,
+			(int) info.server_uri.slen, info.server_uri.ptr,
+			(int) info.client_uri.slen, info.client_uri.ptr);
+	}
 
 	if (client_state->support_path) {
 		pjsip_supported_hdr *hdr;
@@ -795,6 +800,92 @@ static void schedule_retry(struct registration_response *response, unsigned int 
 	}
 }
 
+static int reregister_immediately_cb(void *obj)
+{
+	struct sip_outbound_registration_state *state = obj;
+
+	if (state->client_state->status != SIP_REGISTRATION_REGISTERED) {
+		ao2_ref(state, -1);
+		return 0;
+	}
+
+	if (DEBUG_ATLEAST(1)) {
+		pjsip_regc_info info;
+
+		pjsip_regc_get_info(state->client_state->client, &info);
+		ast_log(LOG_DEBUG,
+			"Outbound registration transport to server '%.*s' from client '%.*s' shutdown\n",
+			(int) info.server_uri.slen, info.server_uri.ptr,
+			(int) info.client_uri.slen, info.client_uri.ptr);
+	}
+
+	cancel_registration(state->client_state);
+
+	ao2_ref(state->client_state, +1);
+	handle_client_registration(state->client_state);
+
+	ao2_ref(state, -1);
+	return 0;
+}
+
+/*!
+ * \internal
+ * \brief The reliable transport we registered using has shutdown.
+ * \since 13.18.0
+ *
+ * \param obj What is needed to initiate a reregister attempt.
+ *
+ * \note Normally executed by the pjsip monitor thread.
+ *
+ * \return Nothing
+ */
+static void registration_transport_shutdown_cb(void *obj)
+{
+	const char *registration_name = obj;
+	struct sip_outbound_registration_state *state;
+
+	state = get_state(registration_name);
+	if (!state) {
+		/* Registration no longer exists or shutting down. */
+		return;
+	}
+	if (ast_sip_push_task(state->client_state->serializer, reregister_immediately_cb, state)) {
+		ao2_ref(state, -1);
+	}
+}
+
+static int monitor_matcher(void *a, void *b)
+{
+	char *ma = a;
+	char *mb = b;
+
+	return strcmp(ma, mb) == 0;
+}
+
+static void registration_transport_monitor_setup(pjsip_transport *transport, const char *registration_name)
+{
+	char *monitor;
+
+	if (!PJSIP_TRANSPORT_IS_RELIABLE(transport)) {
+		return;
+	}
+	monitor = ao2_alloc_options(strlen(registration_name) + 1, NULL,
+		AO2_ALLOC_OPT_LOCK_NOLOCK);
+	if (!monitor) {
+		return;
+	}
+	strcpy(monitor, registration_name);/* Safe */
+
+	/*
+	 * We'll ignore if the transport has already been shutdown before we
+	 * register the monitor.  We might get into a message spamming infinite
+	 * loop of registration, shutdown, reregistration...
+	 */
+	ast_sip_transport_monitor_register(transport, registration_transport_shutdown_cb,
+		monitor);
+	ao2_ref(monitor, -1);
+}
+
 /*! \brief Callback function for handling a response to a registration attempt */
 static int handle_registration_response(void *data)
 {
@@ -863,9 +954,16 @@ static int handle_registration_response(void *data)
 				next_registration_round = 0;
 			}
 			schedule_registration(response->client_state, next_registration_round);
+
+			/* See if we should monitor for transport shutdown */
+			registration_transport_monitor_setup(response->rdata->tp_info.transport,
+				response->client_state->registration_name);
 		} else {
 			ast_debug(1, "Outbound unregistration to '%s' with client '%s' successful\n", server_uri, client_uri);
 			update_client_state_status(response->client_state, SIP_REGISTRATION_UNREGISTERED);
+			ast_sip_transport_monitor_unregister(response->rdata->tp_info.transport,
+				registration_transport_shutdown_cb, response->client_state->registration_name,
+				monitor_matcher);
 		}
 	} else if (response->client_state->destroy) {
 		/* We need to deal with the pending destruction instead. */
@@ -988,7 +1086,8 @@ static void sip_outbound_registration_state_destroy(void *obj)
 	struct sip_outbound_registration_state *state = obj;
 
 	ast_debug(3, "Destroying registration state for registration to server '%s' from client '%s'\n",
-			state->registration->server_uri, state->registration->client_uri);
+		state->registration ? state->registration->server_uri : "",
+		state->registration ? state->registration->client_uri : "");
 	ao2_cleanup(state->registration);
 
 	if (!state->client_state) {
@@ -1007,12 +1106,13 @@ static void sip_outbound_registration_client_state_destroy(void *obj)
 {
 	struct sip_outbound_registration_client_state *client_state = obj;
 
-	ast_free(client_state->transport_name);
 	ast_statsd_log_string("PJSIP.registrations.count", AST_STATSD_GAUGE, "-1", 1.0);
 	ast_statsd_log_string_va("PJSIP.registrations.state.%s", AST_STATSD_GAUGE, "-1", 1.0,
 		sip_outbound_registration_status_str(client_state->status));
 
 	ast_taskprocessor_unreference(client_state->serializer);
+	ast_free(client_state->transport_name);
+	ast_free(client_state->registration_name);
 }
 
 /*! \brief Allocator function for registration state */
@@ -1032,6 +1132,23 @@ static struct sip_outbound_registration_state *sip_outbound_registration_state_a
 		return NULL;
 	}
 
+	state->client_state->status = SIP_REGISTRATION_UNREGISTERED;
+	pj_timer_entry_init(&state->client_state->timer, 0, state->client_state,
+		sip_outbound_registration_timer_cb);
+	state->client_state->transport_name = ast_strdup(registration->transport);
+	state->client_state->registration_name =
+		ast_strdup(ast_sorcery_object_get_id(registration));
+
+	ast_statsd_log_string("PJSIP.registrations.count", AST_STATSD_GAUGE, "+1", 1.0);
+	ast_statsd_log_string_va("PJSIP.registrations.state.%s", AST_STATSD_GAUGE, "+1", 1.0,
+		sip_outbound_registration_status_str(state->client_state->status));
+
+	if (!state->client_state->transport_name
+		|| !state->client_state->registration_name) {
+		ao2_cleanup(state);
+		return NULL;
+	}
+
 	/* Create name with seq number appended. */
 	ast_taskprocessor_build_name(tps_name, sizeof(tps_name), "pjsip/outreg/%s",
 		ast_sorcery_object_get_id(registration));
@@ -1042,14 +1159,6 @@ static struct sip_outbound_registration_state *sip_outbound_registration_state_a
 		ao2_cleanup(state);
 		return NULL;
 	}
-	state->client_state->status = SIP_REGISTRATION_UNREGISTERED;
-	state->client_state->timer.user_data = state->client_state;
-	state->client_state->timer.cb = sip_outbound_registration_timer_cb;
-	state->client_state->transport_name = ast_strdup(registration->transport);
-
-	ast_statsd_log_string("PJSIP.registrations.count", AST_STATSD_GAUGE, "+1", 1.0);
-	ast_statsd_log_string_va("PJSIP.registrations.state.%s", AST_STATSD_GAUGE, "+1", 1.0,
-		sip_outbound_registration_status_str(state->client_state->status));
 
 	state->registration = ao2_bump(registration);
 	return state;
@@ -1289,10 +1398,10 @@ static int sip_outbound_registration_perform(void *data)
 
 	AST_VECTOR_INIT(&state->client_state->outbound_auths, AST_VECTOR_SIZE(&registration->outbound_auths));
 	for (i = 0; i < AST_VECTOR_SIZE(&registration->outbound_auths); ++i) {
-		const char *name = ast_strdup(AST_VECTOR_GET(&registration->outbound_auths, i));
+		char *name = ast_strdup(AST_VECTOR_GET(&registration->outbound_auths, i));
 
-		if (name) {
-			AST_VECTOR_APPEND(&state->client_state->outbound_auths, name);
+		if (name && AST_VECTOR_APPEND(&state->client_state->outbound_auths, name)) {
+			ast_free(name);
 		}
 	}
 	state->client_state->retry_interval = registration->retry_interval;
@@ -1333,7 +1442,7 @@ static int sip_outbound_registration_apply(const struct ast_sorcery *sorcery, vo
 			ast_sorcery_object_get_id(applied));
 		return -1;
 	} else if (ast_sip_validate_uri_length(applied->server_uri)) {
-			ast_log(LOG_ERROR, "Server URI or hostname length exceeds pjpropject limit '%s'\n",
+			ast_log(LOG_ERROR, "Server URI or hostname length exceeds pjproject limit or is not a sip(s) uri: '%s'\n",
 				ast_sorcery_object_get_id(applied));
 			return -1;
 	} else if (ast_strlen_zero(applied->client_uri)) {
@@ -1341,7 +1450,7 @@ static int sip_outbound_registration_apply(const struct ast_sorcery *sorcery, vo
 			ast_sorcery_object_get_id(applied));
 		return -1;
 	} else if (ast_sip_validate_uri_length(applied->client_uri)) {
-			ast_log(LOG_ERROR, "Client URI or hostname length exceeds pjpropject limit '%s'\n",
+			ast_log(LOG_ERROR, "Client URI or hostname length exceeds pjproject limit or is not a sip(s) uri: '%s'\n",
 				ast_sorcery_object_get_id(applied));
 			return -1;
 	} else if (applied->line && ast_strlen_zero(applied->endpoint)) {
@@ -1374,7 +1483,7 @@ static int sip_outbound_registration_apply(const struct ast_sorcery *sorcery, vo
 		return -1;
 	}
 
-	if (ast_sip_push_task_synchronous(new_state->client_state->serializer,
+	if (ast_sip_push_task_wait_serializer(new_state->client_state->serializer,
 		sip_outbound_registration_regc_alloc, new_state)) {
 		return -1;
 	}
@@ -1744,8 +1853,7 @@ static int ami_outbound_registration_detail(void *obj, void *arg, int flags)
 	struct sip_ami_outbound *ami = arg;
 
 	ami->registration = obj;
-	return ast_sip_push_task_synchronous(
-		NULL, ami_outbound_registration_task, ami);
+	return ast_sip_push_task_wait_servant(NULL, ami_outbound_registration_task, ami);
 }
 
 static int ami_show_outbound_registrations(struct mansession *s,
@@ -2053,6 +2161,8 @@ static int unload_module(void)
 
 	ao2_global_obj_release(current_states);
 
+	ast_sip_transport_monitor_unregister_all(registration_transport_shutdown_cb, NULL, NULL);
+
 	/* Wait for registration serializers to get destroyed. */
 	ast_debug(2, "Waiting for registration transactions to complete for unload.\n");
 	remaining = ast_serializer_shutdown_group_join(shutdown_group, MAX_UNLOAD_TIMEOUT_TIME);
@@ -2087,8 +2197,8 @@ static int load_module(void)
 	}
 
 	/* Create outbound registration states container. */
-	new_states = ao2_container_alloc(DEFAULT_STATE_BUCKETS,
-		registration_state_hash, registration_state_cmp);
+	new_states = ao2_container_alloc_hash(AO2_ALLOC_OPT_LOCK_MUTEX, 0,
+		DEFAULT_STATE_BUCKETS, registration_state_hash, NULL, registration_state_cmp);
 	if (!new_states) {
 		ast_log(LOG_ERROR, "Unable to allocate registration states container\n");
 		unload_module();
@@ -2175,6 +2285,8 @@ static int load_module(void)
 
 	network_change_sub = stasis_subscribe(ast_system_topic(),
 		network_change_stasis_cb, NULL);
+	stasis_subscription_accept_message_type(network_change_sub, ast_network_change_type());
+	stasis_subscription_set_filter(network_change_sub, STASIS_SUBSCRIPTION_FILTER_SELECTIVE);
 
 	return AST_MODULE_LOAD_SUCCESS;
 }

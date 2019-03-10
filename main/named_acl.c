@@ -82,8 +82,8 @@ static void *named_acl_find(struct ao2_container *container, const char *cat);
 static struct aco_type named_acl_type = {
 	.type = ACO_ITEM,                  /*!< named_acls are items stored in containers, not individual global objects */
 	.name = "named_acl",
-	.category_match = ACO_BLACKLIST,
-	.category = "^general$",           /*!< Match everything but "general" */
+	.category_match = ACO_BLACKLIST_EXACT,
+	.category = "general",           /*!< Match everything but "general" */
 	.item_alloc = named_acl_alloc,     /*!< A callback to allocate a new named_acl based on category */
 	.item_find = named_acl_find,       /*!< A callback to find a named_acl in some container of named_acls */
 	.item_offset = offsetof(struct named_acl_config, named_acl_list), /*!< Could leave this out since 0 */
@@ -107,19 +107,8 @@ struct named_acl {
 	char name[ACL_NAME_LENGTH]; /* Same max length as a configuration category */
 };
 
-static int named_acl_hash_fn(const void *obj, const int flags)
-{
-	const struct named_acl *entry = obj;
-	return ast_str_hash(entry->name);
-}
-
-static int named_acl_cmp_fn(void *obj, void *arg, const int flags)
-{
-	struct named_acl *entry1 = obj;
-	struct named_acl *entry2 = arg;
-
-	return (!strcmp(entry1->name, entry2->name)) ? (CMP_MATCH | CMP_STOP) : 0;
-}
+AO2_STRING_FIELD_HASH_FN(named_acl, name)
+AO2_STRING_FIELD_CMP_FN(named_acl, name)
 
 /*! \brief destructor for named_acl_config */
 static void named_acl_config_destructor(void *obj)
@@ -139,7 +128,9 @@ static void *named_acl_config_alloc(void)
 		return NULL;
 	}
 
-	if (!(cfg->named_acl_list = ao2_container_alloc(37, named_acl_hash_fn, named_acl_cmp_fn))) {
+	cfg->named_acl_list = ao2_container_alloc_hash(AO2_ALLOC_OPT_LOCK_MUTEX, 0, 37,
+		named_acl_hash_fn, NULL, named_acl_cmp_fn);
+	if (!cfg->named_acl_list) {
 		goto error;
 	}
 
@@ -403,7 +394,7 @@ static int publish_acl_change(const char *name)
 	return 0;
 
 publish_failure:
-	ast_log(LOG_ERROR, "Failed to to issue ACL change message for %s.\n",
+	ast_log(LOG_ERROR, "Failed to issue ACL change message for %s.\n",
 		ast_strlen_zero(name) ? "all named ACLs" : name);
 	return -1;
 }
@@ -513,12 +504,10 @@ static void cli_display_named_acl_list(int fd)
 /* \brief ACL command show <name> */
 static char *handle_show_named_acl_cmd(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a)
 {
-	RAII_VAR(struct named_acl_config *, cfg, ao2_global_obj_ref(globals), ao2_cleanup);
+	struct named_acl_config *cfg;
 	int length;
-	int which;
 	struct ao2_iterator i;
 	struct named_acl *named_acl;
-	char *match = NULL;
 
 	switch (cmd) {
 	case CLI_INIT:
@@ -528,23 +517,29 @@ static char *handle_show_named_acl_cmd(struct ast_cli_entry *e, int cmd, struct 
 			"   Shows a list of named ACLs or lists all entries in a given named ACL.\n";
 		return NULL;
 	case CLI_GENERATE:
+		if (a->pos != 2) {
+			return NULL;
+		}
+
+		cfg = ao2_global_obj_ref(globals);
 		if (!cfg) {
 			return NULL;
 		}
 		length = strlen(a->word);
-		which = 0;
 		i = ao2_iterator_init(cfg->named_acl_list, 0);
 		while ((named_acl = ao2_iterator_next(&i))) {
-			if (!strncasecmp(a->word, named_acl->name, length) && ++which > a->n) {
-				match = ast_strdup(named_acl->name);
-				ao2_ref(named_acl, -1);
-				break;
+			if (!strncasecmp(a->word, named_acl->name, length)) {
+				if (ast_cli_completion_add(ast_strdup(named_acl->name))) {
+					ao2_ref(named_acl, -1);
+					break;
+				}
 			}
 			ao2_ref(named_acl, -1);
 		}
 		ao2_iterator_destroy(&i);
-		return match;
+		ao2_ref(cfg, -1);
 
+		return NULL;
 	}
 
 	if (a->argc == 2) {

@@ -473,7 +473,9 @@ static struct jingle_endpoint_state *jingle_endpoint_state_create(void)
 		return NULL;
 	}
 
-	if (!(state->sessions = ao2_container_alloc(SESSION_BUCKETS, jingle_session_hash, jingle_session_cmp))) {
+	state->sessions = ao2_container_alloc_hash(AO2_ALLOC_OPT_LOCK_MUTEX, 0,
+		SESSION_BUCKETS, jingle_session_hash, NULL, jingle_session_cmp);
+	if (!state->sessions) {
 		ao2_ref(state, -1);
 		return NULL;
 	}
@@ -543,8 +545,8 @@ static int jingle_endpoint_cmp(void *obj, void *arg, int flags)
 static struct aco_type endpoint_option = {
 	.type = ACO_ITEM,
 	.name = "endpoint",
-	.category_match = ACO_BLACKLIST,
-	.category = "^general$",
+	.category_match = ACO_BLACKLIST_EXACT,
+	.category = "general",
 	.item_alloc = jingle_endpoint_alloc,
 	.item_find = jingle_endpoint_find,
 	.item_offset = offsetof(struct jingle_config, endpoints),
@@ -607,7 +609,9 @@ static void *jingle_config_alloc(void)
 		return NULL;
 	}
 
-	if (!(cfg->endpoints = ao2_container_alloc(ENDPOINT_BUCKETS, jingle_endpoint_hash, jingle_endpoint_cmp))) {
+	cfg->endpoints = ao2_container_alloc_hash(AO2_ALLOC_OPT_LOCK_MUTEX, 0,
+		ENDPOINT_BUCKETS, jingle_endpoint_hash, NULL, jingle_endpoint_cmp);
+	if (!cfg->endpoints) {
 		ao2_ref(cfg, -1);
 		return NULL;
 	}
@@ -1907,7 +1911,7 @@ static struct ast_channel *jingle_request(const char *type, struct ast_format_ca
 {
 	RAII_VAR(struct jingle_config *, cfg, ao2_global_obj_ref(globals), ao2_cleanup);
 	RAII_VAR(struct jingle_endpoint *, endpoint, NULL, ao2_cleanup);
-	char *dialed, target[200] = "";
+	char *dialed, target[1024] = "";
 	struct ast_xmpp_buddy *buddy;
 	struct jingle_session *session;
 	struct ast_channel *chan;
@@ -2721,8 +2725,8 @@ static int custom_transport_handler(const struct aco_option *opt, struct ast_var
  * Module loading including tests for configuration or dependencies.
  * This function can return AST_MODULE_LOAD_FAILURE, AST_MODULE_LOAD_DECLINE,
  * or AST_MODULE_LOAD_SUCCESS. If a dependency or environment variable fails
- * tests return AST_MODULE_LOAD_FAILURE. If the module can not load the 
- * configuration file or other non-critical problem return 
+ * tests return AST_MODULE_LOAD_FAILURE. If the module can not load the
+ * configuration file or other non-critical problem return
  * AST_MODULE_LOAD_DECLINE. On success return AST_MODULE_LOAD_SUCCESS.
  */
 static int load_module(void)

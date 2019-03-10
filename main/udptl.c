@@ -239,9 +239,9 @@ static int udptl_pre_apply_config(void);
 static struct aco_type general_option = {
 	.type = ACO_GLOBAL,
 	.name = "global",
-	.category_match = ACO_WHITELIST,
+	.category_match = ACO_WHITELIST_EXACT,
 	.item_offset = offsetof(struct udptl_config, general),
-	.category = "^general$",
+	.category = "general",
 };
 
 static struct aco_type *general_options[] = ACO_TYPES(&general_option);
@@ -1014,7 +1014,6 @@ struct ast_udptl *ast_udptl_new_with_bindaddr(struct ast_sched_context *sched, s
 	int x;
 	int startplace;
 	int i;
-	long int flags;
 	RAII_VAR(struct udptl_config *, cfg, ao2_global_obj_ref(globals), ao2_cleanup);
 
 	if (!cfg || !cfg->general) {
@@ -1039,14 +1038,12 @@ struct ast_udptl *ast_udptl_new_with_bindaddr(struct ast_sched_context *sched, s
 		udptl->tx[i].buf_len = -1;
 	}
 
-	if ((udptl->fd = socket(ast_sockaddr_is_ipv6(addr) ?
+	if ((udptl->fd = ast_socket_nonblock(ast_sockaddr_is_ipv6(addr) ?
 					AF_INET6 : AF_INET, SOCK_DGRAM, 0)) < 0) {
 		ast_free(udptl);
 		ast_log(LOG_WARNING, "Unable to allocate socket: %s\n", strerror(errno));
 		return NULL;
 	}
-	flags = fcntl(udptl->fd, F_GETFL);
-	fcntl(udptl->fd, F_SETFL, flags | O_NONBLOCK);
 
 #ifdef SO_NO_CHECK
 	if (cfg->general->nochecksums)

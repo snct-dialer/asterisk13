@@ -463,16 +463,17 @@ struct ast_str *ast_manager_build_channel_state_string_prefix(
 		const struct ast_channel_snapshot *snapshot,
 		const char *prefix)
 {
-	struct ast_str *out = ast_str_create(1024);
-	int res = 0;
-	char *caller_name, *connected_name;
+	struct ast_str *out;
+	char *caller_name;
+	char *connected_name;
+	int res;
 
-	if (!out) {
+	if (snapshot->tech_properties & AST_CHAN_TP_INTERNAL) {
 		return NULL;
 	}
 
-	if (snapshot->tech_properties & AST_CHAN_TP_INTERNAL) {
-		ast_free(out);
+	out = ast_str_create(1024);
+	if (!out) {
 		return NULL;
 	}
 
@@ -509,10 +510,11 @@ struct ast_str *ast_manager_build_channel_state_string_prefix(
 		prefix, snapshot->uniqueid,
 		prefix, snapshot->linkedid);
 
+	ast_free(caller_name);
+	ast_free(connected_name);
+
 	if (!res) {
 		ast_free(out);
-		ast_free(caller_name);
-		ast_free(connected_name);
 		return NULL;
 	}
 
@@ -527,9 +529,6 @@ struct ast_str *ast_manager_build_channel_state_string_prefix(
 			ast_free(val);
 		}
 	}
-
-	ast_free(caller_name);
-	ast_free(connected_name);
 
 	return out;
 }
@@ -964,11 +963,11 @@ static void channel_hangup_handler_cb(void *data, struct stasis_subscription *su
 		return;
 	}
 
-	if (!strcmp(action, "type")) {
+	if (!strcmp(action, "run")) {
 		event = "HangupHandlerRun";
-	} else if (!strcmp(action, "type")) {
+	} else if (!strcmp(action, "pop")) {
 		event = "HangupHandlerPop";
-	} else if (!strcmp(action, "type")) {
+	} else if (!strcmp(action, "push")) {
 		event = "HangupHandlerPush";
 	} else {
 		return;
@@ -1241,6 +1240,10 @@ int manager_channels_init(void)
 
 	ast_register_cleanup(manager_channels_shutdown);
 
+	/* The snapshot type has a special handler as it can result in multiple
+	 * manager events being queued due to aspects of the snapshot itself
+	 * changing.
+	 */
 	ret |= stasis_message_router_add_cache_update(message_router,
 		ast_channel_snapshot_type(), channel_snapshot_update, NULL);
 
@@ -1300,4 +1303,3 @@ int manager_channels_init(void)
 
 	return 0;
 }
-

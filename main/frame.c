@@ -122,14 +122,18 @@ static void __frame_free(struct ast_frame *fr, int cache)
 		return;
 
 #if !defined(LOW_MEMORY)
-	if (cache && fr->mallocd == AST_MALLOCD_HDR) {
+	if (fr->mallocd == AST_MALLOCD_HDR
+		&& cache
+		&& ast_opt_cache_media_frames) {
 		/* Cool, only the header is malloc'd, let's just cache those for now
 		 * to keep things simple... */
 		struct ast_frame_cache *frames;
-		if ((frames = ast_threadstorage_get(&frame_cache, sizeof(*frames))) &&
-		    (frames->size < FRAME_CACHE_MAX_SIZE)) {
-			if ((fr->frametype == AST_FRAME_VOICE) || (fr->frametype == AST_FRAME_VIDEO) ||
-				(fr->frametype == AST_FRAME_IMAGE)) {
+
+		frames = ast_threadstorage_get(&frame_cache, sizeof(*frames));
+		if (frames && frames->size < FRAME_CACHE_MAX_SIZE) {
+			if (fr->frametype == AST_FRAME_VOICE
+				|| fr->frametype == AST_FRAME_VIDEO
+				|| fr->frametype == AST_FRAME_IMAGE) {
 				ao2_cleanup(fr->subclass.format);
 			}
 
@@ -149,8 +153,9 @@ static void __frame_free(struct ast_frame *fr, int cache)
 		ast_free((void *) fr->src);
 	}
 	if (fr->mallocd & AST_MALLOCD_HDR) {
-		if ((fr->frametype == AST_FRAME_VOICE) || (fr->frametype == AST_FRAME_VIDEO) ||
-			(fr->frametype == AST_FRAME_IMAGE)) {
+		if (fr->frametype == AST_FRAME_VOICE
+			|| fr->frametype == AST_FRAME_VIDEO
+			|| fr->frametype == AST_FRAME_IMAGE) {
 			ao2_cleanup(fr->subclass.format);
 		}
 
@@ -165,18 +170,16 @@ void ast_frame_free(struct ast_frame *frame, int cache)
 {
 	struct ast_frame *next;
 
-	for (next = AST_LIST_NEXT(frame, frame_list);
-	     frame;
-	     frame = next, next = frame ? AST_LIST_NEXT(frame, frame_list) : NULL) {
+	while (frame) {
+		next = AST_LIST_NEXT(frame, frame_list);
 		__frame_free(frame, cache);
+		frame = next;
 	}
 }
 
 void ast_frame_dtor(struct ast_frame *f)
 {
-	if (f) {
-		ast_frfree(f);
-	}
+	ast_frfree(f);
 }
 
 /*!
@@ -257,7 +260,7 @@ struct ast_frame *ast_frisolate(struct ast_frame *fr)
 
 	if (!(fr->mallocd & AST_MALLOCD_DATA))  {
 		/* The original frame has a non-malloced data buffer. */
-		if (!fr->datalen) {
+		if (!fr->datalen && fr->frametype != AST_FRAME_TEXT) {
 			/* Actually it's just an int so we can simply copy it. */
 			out->data.uint32 = fr->data.uint32;
 			return out;
@@ -354,7 +357,8 @@ struct ast_frame *ast_frdup(const struct ast_frame *f)
 	 */
 	out->mallocd = AST_MALLOCD_HDR;
 	out->offset = AST_FRIENDLY_OFFSET;
-	if (out->datalen) {
+	/* Make sure that empty text frames have a valid data.ptr */
+	if (out->datalen || f->frametype == AST_FRAME_TEXT) {
 		out->data.ptr = buf + sizeof(*out) + AST_FRIENDLY_OFFSET;
 		memcpy(out->data.ptr, f->data.ptr, out->datalen);
 	} else {
@@ -587,6 +591,9 @@ void ast_frame_type2str(enum ast_frame_type frame_type, char *ftype, size_t len)
 		break;
 	case AST_FRAME_TEXT:
 		ast_copy_string(ftype, "Text", len);
+		break;
+	case AST_FRAME_TEXT_DATA:
+		ast_copy_string(ftype, "Text Data", len);
 		break;
 	case AST_FRAME_IMAGE:
 		ast_copy_string(ftype, "Image", len);
