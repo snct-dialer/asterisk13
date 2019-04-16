@@ -260,8 +260,8 @@ static struct aco_type global_option = {
 	.type = ACO_GLOBAL,
 	.name = "general",
 	.item_offset = offsetof(struct module_config, general),
-	.category_match = ACO_WHITELIST,
-	.category = "^general$",
+	.category_match = ACO_WHITELIST_EXACT,
+	.category = "general",
 };
 
 struct aco_type *global_options[] = ACO_TYPES(&global_option);
@@ -369,6 +369,27 @@ static void hepv3_data_dtor(void *obj)
 	}
 }
 
+/*! \brief Pulls first resolved address and returns it */
+static int ast_sockaddr_resolve_first_af(struct ast_sockaddr *addr,
+				      const char* name, int flag, int family)
+{
+	struct ast_sockaddr *addrs;
+	int addrs_cnt;
+
+	addrs_cnt = ast_sockaddr_resolve(&addrs, name, flag, family);
+	if (addrs_cnt <= 0) {
+		return 1;
+	}
+	if (addrs_cnt > 1) {
+		ast_debug(1, "Multiple addresses resolving %s, using the first one only\n", name);
+	}
+
+	ast_sockaddr_copy(addr, &addrs[0]);
+
+	ast_free(addrs);
+	return 0;
+}
+
 /*! \brief Allocate the HEPv3 run-time data */
 static struct hepv3_runtime_data *hepv3_data_alloc(struct hepv3_global_config *config)
 {
@@ -381,10 +402,11 @@ static struct hepv3_runtime_data *hepv3_data_alloc(struct hepv3_global_config *c
 
 	data->sockfd = -1;
 
-	if (!ast_sockaddr_parse(&data->remote_addr, config->capture_address, PARSE_PORT_REQUIRE)) {
+	if (ast_sockaddr_resolve_first_af(&data->remote_addr, config->capture_address, PARSE_PORT_REQUIRE, AST_AF_UNSPEC)) {
 		ast_log(AST_LOG_WARNING, "Failed to create address from %s\n", config->capture_address);
 		ao2_ref(data, -1);
 		return NULL;
+
 	}
 
 	data->sockfd = socket(ast_sockaddr_is_ipv6(&data->remote_addr) ? AF_INET6 : AF_INET, SOCK_DGRAM, 0);
@@ -423,7 +445,7 @@ int hepv3_is_loaded(void)
 {
 	RAII_VAR(struct module_config *, config, ao2_global_obj_ref(global_config), ao2_cleanup);
 
-	return (config != NULL) ? 1 : 0;
+	return config && config->general->enabled;
 }
 
 struct hepv3_capture_info *hepv3_create_capture_info(const void *payload, size_t len)

@@ -41,7 +41,10 @@
 #define DEFAULT_BRIDGE_PROFILE "default_bridge"
 #define DEFAULT_MENU_PROFILE "default_menu"
 
+/*! Default minimum average magnitude threshold to determine talking by the DSP. */
 #define DEFAULT_TALKING_THRESHOLD 160
+
+/*! Default time in ms of silence necessary to declare talking stopped by the bridge. */
 #define DEFAULT_SILENCE_THRESHOLD 2500
 
 enum user_profile_flags {
@@ -136,9 +139,9 @@ struct user_profile {
 	char announcement[PATH_MAX];
 	unsigned int flags;
 	unsigned int announce_user_count_all_after;
-	/*! The time in ms of talking before a user is considered to be talking by the dsp. */
+	/*! Minimum average magnitude threshold to determine talking by the DSP. */
 	unsigned int talking_threshold;
-	/*! The time in ms of silence before a user is considered to be silent by the dsp. */
+	/*! Time in ms of silence necessary to declare talking stopped by the bridge. */
 	unsigned int silence_threshold;
 	/*! The time in ms the user may stay in the confbridge */
 	unsigned int timeout;
@@ -251,6 +254,7 @@ struct confbridge_user {
 	unsigned int muted:1;                        /*!< Has the user requested to be muted? */
 	unsigned int kicked:1;                       /*!< User has been kicked from the conference */
 	unsigned int playing_moh:1;                  /*!< MOH is currently being played to the user */
+	unsigned int talking:1;                      /*!< User is currently talking */
 	AST_LIST_HEAD_NOLOCK(, post_join_action) post_join_list; /*!< List of sounds to play after joining */;
 	AST_LIST_ENTRY(confbridge_user) list;        /*!< Linked list information */
 };
@@ -468,13 +472,11 @@ void conf_handle_first_join(struct confbridge_conference *conference);
  */
 int conf_handle_inactive_waitmarked(struct confbridge_user *user);
 
-/*! \brief Handle actions whenever an unmarked user joins an inactive conference
- * \note These actions seem like they could apply just as well to a marked user
- * and possibly be made to happen any time transitioning to a single state.
+/*! \brief Handle actions whenever an user joins an empty conference
  *
- * \param user The unmarked user
+ * \param user The user
  */
-int conf_handle_only_unmarked(struct confbridge_user *user);
+int conf_handle_only_person(struct confbridge_user *user);
 
 /*! \brief Handle when a conference moves to having more than one active participant
  * \param conference The conference bridge with more than one active participant

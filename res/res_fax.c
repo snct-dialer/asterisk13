@@ -365,7 +365,7 @@ ASTERISK_FILE_VERSION(__FILE__, "$Revision$")
 					'gateway' and state is 'Uninitialized'.</para>
 				</parameter>
 				<parameter name="FileName" required="false">
-					<para>Filename of the image being sent/recieved for this FAX session. This field is not
+					<para>Filename of the image being sent/received for this FAX session. This field is not
 					included if Operation isn't 'send' or 'receive'.</para>
 				</parameter>
 				<parameter name="PagesTransmitted" required="false">
@@ -377,7 +377,7 @@ ASTERISK_FILE_VERSION(__FILE__, "$Revision$")
 					Operation is not 'send' or 'receive'. Will be 0 for 'send'.</para>
 				</parameter>
 				<parameter name="TotalBadLines" required="false">
-					<para>Total number of bad lines sent/recieved during this session. This field is not
+					<para>Total number of bad lines sent/received during this session. This field is not
 					included if Operation is not 'send' or 'received'.</para>
 				</parameter>
 			</syntax>
@@ -809,17 +809,17 @@ unsigned int ast_fax_minrate(void)
 
 static int update_modem_bits(enum ast_fax_modems *bits, const char *value)
 {
-	char *m[5], *tok, *v = (char *)value;
+	char *m[5], *tok, *v = (char *) value, *rest;
 	int i = 0, j;
 
 	if (!strchr(v, ',')) {
 		m[i++] = v;
 		m[i] = NULL;
 	} else {
-		tok = strtok(v, ", ");
+		tok = strtok_r(v, ", ", &rest);
 		while (tok && i < ARRAY_LEN(m) - 1) {
 			m[i++] = tok;
-			tok = strtok(NULL, ", ");
+			tok = strtok_r(NULL, ", ", &rest);
 		}
 		m[i] = NULL;
 	}
@@ -2914,6 +2914,11 @@ static int fax_gateway_start(struct fax_gateway *gateway, struct ast_fax_session
 	struct ast_fax_session *s;
 	int start_res;
 
+	/* if the fax gateway is already started then do nothing */
+	if (gateway->s && gateway->s->state != AST_FAX_STATE_RESERVED) {
+		return 0;
+	}
+
 	/* create the FAX session */
 	if (!(s = fax_session_new(details, chan, gateway->s, gateway->token))) {
 		gateway->token = NULL;
@@ -4563,12 +4568,7 @@ static int acf_faxopt_write(struct ast_channel *chan, const char *cmd, char *dat
 					unsigned int gwtimeout;
 
 					if (sscanf(timeout, "%30u", &gwtimeout) == 1) {
-						if (gwtimeout >= 0) {
-							details->gateway_timeout = gwtimeout * 1000;
-						} else {
-							ast_log(LOG_WARNING, "%s(%s) timeout cannot be negative.  Ignoring timeout\n",
-								cmd, data);
-						}
+						details->gateway_timeout = gwtimeout * 1000;
 					} else {
 						ast_log(LOG_WARNING, "Unsupported timeout '%s' passed to FAXOPT(%s).\n", timeout, data);
 					}
@@ -4607,13 +4607,7 @@ static int acf_faxopt_write(struct ast_channel *chan, const char *cmd, char *dat
 			if (details->faxdetect_id < 0) {
 				if (timeout) {
 					if (sscanf(timeout, "%30u", &fdtimeout) == 1) {
-						if (fdtimeout >= 0) {
-							fdtimeout *= 1000;
-						} else {
-							ast_log(LOG_WARNING, "%s(%s) timeout cannot be negative.  Ignoring timeout\n",
-								cmd, data);
-							fdtimeout = 0;
-						}
+						fdtimeout *= 1000;
 					} else {
 						ast_log(LOG_WARNING, "Unsupported timeout '%s' passed to FAXOPT(%s).\n",
 							timeout, data);
@@ -4730,7 +4724,9 @@ static int load_module(void)
 	/* initialize the registry */
 	faxregistry.active_sessions = 0;
 	faxregistry.reserved_sessions = 0;
-	if (!(faxregistry.container = ao2_container_alloc(FAX_MAXBUCKETS, session_hash_cb, session_cmp_cb))) {
+	faxregistry.container = ao2_container_alloc_hash(AO2_ALLOC_OPT_LOCK_MUTEX, 0,
+		FAX_MAXBUCKETS, session_hash_cb, NULL, session_cmp_cb);
+	if (!faxregistry.container) {
 		return AST_MODULE_LOAD_DECLINE;
 	}
 

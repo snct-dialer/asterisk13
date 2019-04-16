@@ -1,10 +1,29 @@
-asterisk (2:13.17.0~fp-1) UNRELEASED; urgency=medium
+asterisk (2:13.26.0~se-3) stretch; urgency=medium
+
+  * New upstream release.
+
+ -- Jörg Frings-Fürst <debian@jff.email>  Tue, 16 Apr 2019 10:07:33 +0200
+
+asterisk (2:13.25.0~se-2) stretch; urgency=medium
+
+  * New debian/patches/0115-vicidial.patch: Fix AMD issues.
+
+ -- Jörg Frings-Fürst <debian@jff.email>  Fri, 12 Apr 2019 10:41:05 +0200
+
+asterisk (2:13.25.0~se-1) stretch; urgency=medium
+
+  * New upstream release.
+  * Fix app_voicemail.
+
+ -- Jörg Frings-Fürst <debian@jff.email>  Sun, 10 Mar 2019 19:13:45 +0100
+
+asterisk (2:13.17.0~fp-1) stable; urgency=medium
 
   * Fork from debian.
   * New patches/0100-Enable-meetme.patch to enable
     meetme.
 
- -- Jörg Frings-Fürst <debian@jff-webhosting.net>  Mon, 28 Aug 2017 13:08:36 +0200
+ -- Jörg Frings-Fürst <debian@jff.email>  Wed, 13 Dec 2017 18:24:22 +0100
 
 asterisk (1:13.17.0~dfsg-2) unstable; urgency=medium
 

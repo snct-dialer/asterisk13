@@ -387,7 +387,6 @@ static int ari_bridges_play_helper(const char *args_media,
 
 	if (ast_asprintf(playback_url, "/playbacks/%s",
 			stasis_app_playback_get_id(playback)) == -1) {
-		playback_url = NULL;
 		ast_ari_response_alloc_failed(response);
 		return -1;
 	}
@@ -817,6 +816,7 @@ void ast_ari_bridges_start_moh(struct ast_variable *headers,
 	}
 
 	ast_moh_start(moh_channel, moh_class, NULL);
+	ast_channel_cleanup(moh_channel);
 
 	ast_ari_response_no_content(response);
 
@@ -958,13 +958,12 @@ void ast_ari_bridges_create_with_id(struct ast_variable *headers,
 
 	if (bridge) {
 		/* update */
-		if (!ast_strlen_zero(args->name)) {
-			if (!strcmp(args->name, bridge->name)) {
-				ast_ari_response_error(
-					response, 500, "Internal Error",
-					"Changing bridge name is not implemented");
-				return;
-			}
+		if (!ast_strlen_zero(args->name)
+			&& strcmp(args->name, bridge->name)) {
+			ast_ari_response_error(
+				response, 500, "Internal Error",
+				"Changing bridge name is not implemented");
+			return;
 		}
 		if (!ast_strlen_zero(args->type)) {
 			ast_ari_response_error(

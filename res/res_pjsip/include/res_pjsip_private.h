@@ -135,6 +135,29 @@ void ast_sip_destroy_distributor(void);
 
 /*!
  * \internal
+ * \brief Initialize the transport events notify module
+ * \since 13.18.0
+ *
+ * The transport events notify module is responsible for monitoring
+ * when transports die and calling any registered callbacks when that
+ * happens.  It also manages any PJPROJECT transport state callbacks
+ * registered to it so the callbacks be more dynamic allowing module
+ * loading/unloading.
+ *
+ * \retval -1 Failure
+ * \retval 0 Success
+ */
+int ast_sip_initialize_transport_events(void);
+
+/*!
+ * \internal
+ * \brief Destruct the transport events notify module.
+ * \since 13.18.0
+ */
+void ast_sip_destroy_transport_events(void);
+
+/*!
+ * \internal
  * \brief Initialize global type on a sorcery instance
  *
  * \retval -1 failure
@@ -170,6 +193,15 @@ void ast_sip_destroy_global_headers(void);
 
 /*!
  * \internal
+ * \brief Pre-initialize OPTIONS request handling.
+ *
+ * \retval 0 on success
+ * \retval other on failure
+ */
+int ast_res_pjsip_preinit_options_handling(void);
+
+/*!
+ * \internal
  * \brief Initialize OPTIONS request handling.
  *
  * XXX This currently includes qualifying peers. It shouldn't.
@@ -189,7 +221,7 @@ int ast_res_pjsip_init_options_handling(int reload);
  * \retval 0 on success
  * \retval other on failure
  */
-int ast_res_pjsip_init_message_ip_updater(void);
+int ast_res_pjsip_init_message_filter(void);
 
 /*!
  * \internal
@@ -258,7 +290,7 @@ void ast_res_pjsip_cleanup_options_handling(void);
  * \internal
  * \brief Clean up res_pjsip message ip updating handling
  */
-void ast_res_pjsip_cleanup_message_ip_updater(void);
+void ast_res_pjsip_cleanup_message_filter(void);
 
 /*!
  * \internal
@@ -317,6 +349,18 @@ int internal_sip_unregister_service(pjsip_module *module);
 
 /*!
  * \internal
+ * \brief Used by res_pjsip.so to register a supplement without adding a self reference
+ */
+void internal_sip_register_supplement(struct ast_sip_supplement *supplement);
+
+/*!
+ * \internal
+ * \brief Used by res_pjsip.so to unregister a supplement without removing a self reference
+ */
+int internal_sip_unregister_supplement(struct ast_sip_supplement *supplement);
+
+/*!
+ * \internal
  * \brief Used by res_pjsip.so to register an endpoint formatter without adding a self reference
  */
 void internal_sip_register_endpoint_formatter(struct ast_sip_endpoint_formatter *obj);
@@ -326,6 +370,20 @@ void internal_sip_register_endpoint_formatter(struct ast_sip_endpoint_formatter 
  * \brief Used by res_pjsip.so to unregister a endpoint formatter without removing a self reference
  */
 int internal_sip_unregister_endpoint_formatter(struct ast_sip_endpoint_formatter *obj);
+
+struct ast_sip_session_supplement;
+
+/*!
+ * \internal
+ * \brief Used by res_pjsip.so to register a session supplement without adding a self reference
+ */
+void internal_sip_session_register_supplement(struct ast_sip_session_supplement *supplement);
+
+/*!
+ * \internal
+ * \brief Used by res_pjsip.so to unregister a session supplement without removing a self reference
+ */
+int internal_sip_session_unregister_supplement(struct ast_sip_session_supplement *supplement);
 
 /*!
  * \internal
@@ -357,5 +415,79 @@ int ast_sip_initialize_scheduler(void);
  * \retval 0 success
  */
 int ast_sip_destroy_scheduler(void);
+
+/*!
+ * \internal
+ * \brief Add a reference to the res_pjsip module
+ */
+void internal_res_pjsip_ref(void);
+
+/*!
+ * \internal
+ * \brief Remove a reference from the res_pjsip module
+ */
+void internal_res_pjsip_unref(void);
+
+/*!
+ * \internal
+ * \brief Determines if a uri will still be valid after an asterisk restart
+ * \since 13.20.0
+ *
+ * \param uri uri to test
+ * \param endpoint The associated endpoint
+ * \param rdata The rdata to get transport information from
+ *
+ * \retval 1 Yes, 0 No
+ */
+int ast_sip_will_uri_survive_restart(pjsip_sip_uri *uri, struct ast_sip_endpoint *endpoint,
+	pjsip_rx_data *rdata);
+
+/*!
+ * \internal
+ * \brief Initialize the transport management module
+ * \since 13.20.0
+ *
+ * The transport management module is responsible for 3 things...
+ * 1.  It automatically destroys any reliable transport that does not
+ * receive a valid request within system/timer_b milliseconds of the
+ * connection being opened. (Attack mitigation)
+ * 2.  Since it increments the reliable transport's reference count
+ * for that period of time, it also prevents issues if the transport
+ * disconnects while we're still trying to process a response.
+ *  (Attack mitigation)
+ * 3.  If enabled by global/keep_alive_interval, it sends '\r\n'
+ * keepalives on reliable transports at the interval specified.
+ *
+ * \retval -1 Failure
+ * \retval 0 Success
+ */
+int ast_sip_initialize_transport_management(void);
+
+/*!
+ * \internal
+ * \brief Destruct the transport management module.
+ * \since 13.20.0
+ */
+void ast_sip_destroy_transport_management(void);
+
+/*!
+ * \internal
+ * \brief Add online persistent endpoints to the given regcontext
+ *
+ * \param regcontext The context to add endpoints to
+ *
+ * \retval -1 on error, 0 on success
+ */
+int ast_sip_persistent_endpoint_add_to_regcontext(const char *regcontext);
+
+enum ast_sip_taskprocessor_overload_trigger {
+	TASKPROCESSOR_OVERLOAD_TRIGGER_NONE = 0,
+	TASKPROCESSOR_OVERLOAD_TRIGGER_GLOBAL,
+	TASKPROCESSOR_OVERLOAD_TRIGGER_PJSIP_ONLY
+};
+
+enum ast_sip_taskprocessor_overload_trigger ast_sip_get_taskprocessor_overload_trigger(void);
+
+const char *ast_sip_overload_trigger_to_str(enum ast_sip_taskprocessor_overload_trigger trigger);
 
 #endif /* RES_PJSIP_PRIVATE_H_ */

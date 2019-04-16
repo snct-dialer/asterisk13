@@ -288,8 +288,8 @@
 ; a transport that you'll need to uncomment from the previous examples.
 ;
 ; Uncomment one of the transport lines to choose which transport you want. If
-; not specified then the default transport chosen is the first defined transport
-; in the configuration file.
+; not specified then the default transport chosen is the first compatible transport
+; in the configuration file for the contact URL.
 ;
 ; Modify the "max_contacts=" line to change how many unique registrations to allow.
 ;
@@ -608,6 +608,10 @@
 ;direct_media_glare_mitigation=none     ; Mitigation of direct media re INVITE
                                         ; glare (default: "none")
 ;direct_media_method=invite     ; Direct Media method type (default: "invite")
+;trust_connected_line=yes       ; Accept Connected Line updates from this endpoint
+                                ; (default: "yes")
+;send_connected_line=yes        ; Send Connected Line updates to this endpoint
+                                ; (default: "yes")
 ;connected_line_method=invite   ; Connected line method type.
                                 ; When set to "invite", check the remote's
                                 ; Allow header and if UPDATE is allowed, send
@@ -634,9 +638,12 @@
                         ; identified.
                         ; "username": Identify by the From or To username and domain
                         ; "auth_username": Identify by the Authorization username and realm
-                        ; In all cases, if an exact match on username and domain/realm fails,
-                        ; the match will be retried with just the username.
-                        ; (default: "username")
+                        ; "ip": Identify by the source IP address
+                        ; "header": Identify by a configured SIP header value.
+                        ; In the username and auth_username cases, if an exact match
+                        ; on both username and domain/realm fails, the match is
+                        ; retried with just the username.
+                        ; (default: "username,ip")
 ;redirect_method=user   ; How redirects received from an endpoint are handled
                         ; (default: "user")
 ;mailboxes=     ; NOTIFY the endpoint when state changes for any of the specified mailboxes.
@@ -665,7 +672,12 @@
 ;timers=yes     ; Session timers for SIP packets (default: "yes")
 ;timers_sess_expires=1800       ; Maximum session timer expiration period
                                 ; (default: "1800")
-;transport=     ; Desired transport configuration (default: "")
+;transport=     ; Explicit transport configuration to use (default: "")
+                ; This will force the endpoint to use the specified transport
+                ; configuration to send SIP messages.  You need to already know
+                ; what kind of transport (UDP/TCP/IPv4/etc) the endpoint device
+                ; will use.
+
 ;trust_id_inbound=no    ; Accept identification information received from this
                         ; endpoint (default: "no")
 ;trust_id_outbound=no   ; Send private identification details to the endpoint
@@ -780,6 +792,49 @@
                               ; The value "yes" is useful for some SIP phones
                               ; (Cisco SPA) to be able to indicate and pick up
                               ; ringing devices.
+;incoming_mwi_mailbox = ; Mailbox name to use when incoming MWI NOTIFYs are
+                        ; received.
+                        ; If an MWI NOTIFY is received FROM this endpoint,
+                        ; this mailbox will be used when notifying other modules
+                        ; of MWI status changes.  If not set, incoming MWI
+                        ; NOTIFYs are ignored.
+;follow_early_media_fork = ; On outgoing calls, if the UAS responds with
+                           ; different SDP attributes on subsequent 18X or 2XX
+                           ; responses (such as a port update) AND the To tag
+                           ; on the subsequent response is different than that
+                           ; on the previous one, follow it.  This usually
+                           ; happens when the INVITE is forked to multiple UASs
+                           ; and more than 1 sends an SDP answer.
+                           ; This option must also be enabled in the system
+                           ; section.
+                           ; (default: yes)
+;accept_multiple_sdp_answers =
+                           ; On outgoing calls, if the UAS responds with
+                           ; different SDP attributes on non-100rel 18X or 2XX
+                           ; responses (such as a port update) AND the To tag on
+                           ; the subsequent response is the same as that on the
+                           ; previous one, process it. This can happen when the
+                           ; UAS needs to change ports for some reason such as
+                           ; using a separate port for custom ringback.
+                           ; This option must also be enabled in the system
+                           ; section.
+                           ; (default: no)
+;suppress_q850_reason_headers =
+                           ; Suppress Q.850 Reason headers for this endpoint.
+                           ; Some devices can't accept multiple Reason headers
+                           ; and get confused when both 'SIP' and 'Q.850' Reason
+                           ; headers are received.  This option allows the
+                           ; 'Q.850' Reason header to be suppressed.
+                           ; (default: no)
+;ignore_183_without_sdp =
+                           ; Do not forward 183 when it doesn't contain SDP.
+                           ; Certain SS7 internetworking scenarios can result in
+                           ; a 183 to be generated for reasons other than early
+                           ; media.  Forwarding this 183 can cause loss of
+                           ; ringback tone.  This flag emulates the behavior of
+                           ; chan_sip and prevents these 183 responses from
+                           ; being forwarded.
+                           ; (default: no)
 
 ;==========================AUTH SECTION OPTIONS=========================
 ;[auth]
@@ -812,10 +867,13 @@
 ;==========================TRANSPORT SECTION OPTIONS=========================
 ;[transport]
 ;  SYNOPSIS: SIP Transport
+;
 ;async_operations=1     ; Number of simultaneous Asynchronous Operations
                         ; (default: "1")
 ;bind=  ; IP Address and optional port to bind to for this transport (default:
         ; "")
+; Note that for the Websocket transport the TLS configuration is configured
+; in http.conf and is applied for all HTTPS traffic.
 ;ca_list_file=  ; File containing a list of certificates to read TLS ONLY
                 ; (default: "")
 ;ca_list_path=  ; Path to directory containing certificates to read TLS ONLY.
@@ -827,6 +885,13 @@
                 ; a .key file must be specified via priv_key_file
                 ; (default: "")
 ;cipher=        ; Preferred cryptography cipher names TLS ONLY (default: "")
+;method=        ; Method of SSL transport TLS ONLY (default: "")
+;priv_key_file= ; Private key file TLS ONLY (default: "")
+;verify_client= ; Require verification of client certificate TLS ONLY (default:
+                ; "")
+;verify_server= ; Require verification of server certificate TLS ONLY (default:
+                ; "")
+;require_client_cert=   ; Require client certificate TLS ONLY (default: "")
 ;domain=        ; Domain the transport comes from (default: "")
 ;external_media_address=        ; External IP address to use in RTP handling
                                 ; (default: "")
@@ -834,17 +899,10 @@
                                 ; "")
 ;external_signaling_port=0      ; External port for SIP signalling (default:
                                 ; "0")
-;method=        ; Method of SSL transport TLS ONLY (default: "")
 ;local_net=     ; Network to consider local used for NAT purposes (default: "")
 ;password=      ; Password required for transport (default: "")
-;priv_key_file= ; Private key file TLS ONLY (default: "")
 ;protocol=udp   ; Protocol to use for SIP traffic (default: "udp")
-;require_client_cert=   ; Require client certificate TLS ONLY (default: "")
 ;type=  ; Must be of type transport (default: "")
-;verify_client= ; Require verification of client certificate TLS ONLY (default:
-                ; "")
-;verify_server= ; Require verification of server certificate TLS ONLY (default:
-                ; "")
 ;tos=0  ; Enable TOS for the signalling sent over this transport (default: "0")
 ;cos=0  ; Enable COS for the signalling sent over this transport (default: "0")
 ;websocket_write_timeout=100    ; Default write timeout to set on websocket
@@ -888,7 +946,13 @@
 ;max_contacts=0 ; Maximum number of contacts that can bind to an AoR (default:
                 ; "0")
 ;minimum_expiration=60  ; Minimum keep alive time for an AoR (default: "60")
-;remove_existing=no     ; Determines whether new contacts replace existing ones
+;remove_existing=no     ; Allow a registration to succeed by displacing any existing
+                        ; contacts that now exceed the max_contacts count.  Any
+                        ; removed contacts are the next to expire.  The behaviour is
+                        ; beneficial when rewrite_contact is enabled and max_contacts
+                        ; is greater than one.  The removed contact is likely the old
+                        ; contact created by rewrite_contact that the device is
+                        ; refreshing.
                         ; (default: "no")
 ;type=  ; Must be of type aor (default: "")
 ;qualify_frequency=0    ; Interval at which to qualify an AoR (default: "0")
@@ -920,6 +984,27 @@
                         ; Disabling this option has been known to cause interoperability
                         ; issues, so disable at your own risk.
                         ; (default: "yes")
+;follow_early_media_fork = ; On outgoing calls, if the UAS responds with
+                           ; different SDP attributes on subsequent 18X or 2XX
+                           ; responses (such as a port update) AND the To tag
+                           ; on the subsequent response is different than that
+                           ; on the previous one, follow it.  This usually
+                           ; happens when the INVITE is forked to multiple UASs
+                           ; and more than 1 sends an SDP answer.
+                           ; This option must also be enabled on endpoints that
+                           ; require this functionality.
+                           ; (default: yes)
+;accept_multiple_sdp_answers =
+                           ; On outgoing calls, if the UAS responds with
+                           ; different SDP attributes on non-100rel 18X or 2XX
+                           ; responses (such as a port update) AND the To tag on
+                           ; the subsequent response is the same as that on the
+                           ; previous one, process it. This can happen when the
+                           ; UAS needs to change ports for some reason such as
+                           ; using a separate port for custom ringback.
+                           ; This option must also be enabled on endpoints that
+                           ; require this functionality.
+                           ; (default: no)
 ;type=  ; Must be of type system (default: "")
 
 ;==========================GLOBAL SECTION OPTIONS=========================
@@ -953,11 +1038,11 @@
             ; (default: "no")
 ;endpoint_identifier_order=ip,username,anonymous
             ; The order by which endpoint identifiers are given priority.
-            ; Currently, "ip", "username", "auth_username" and "anonymous" are valid
-            ; identifiers as registered by the res_pjsip_endpoint_identifier_* modules.
-            ; Some modules like res_pjsip_endpoint_identifier_user register more than
-            ; one identifier. Use the CLI command "pjsip show identifiers" to see the
-            ; identifiers currently available.
+            ; Currently, "ip", "header", "username", "auth_username" and "anonymous"
+            ; are valid identifiers as registered by the res_pjsip_endpoint_identifier_*
+            ; modules.  Some modules like res_pjsip_endpoint_identifier_user register
+            ; more than one identifier.  Use the CLI command "pjsip show identifiers"
+            ; to see the identifiers currently available.
             ; (default: ip,username,anonymous)
 ;max_initial_qualify_time=4 ; The maximum amount of time (in seconds) from
                             ; startup that qualifies should be attempted on all
@@ -1031,6 +1116,22 @@
                     ; from incoming SIP URI user fields are always truncated at the
                     ; first semicolon.
 
+;send_contact_status_on_update_registration=yes ; Enable sending AMI ContactStatus
+                    ; event when a device refreshes its registration
+                    ; (default: "yes")
+
+;taskprocessor_overload_trigger=global
+                ; Set the trigger the distributor will use to detect
+                ; taskprocessor overloads.  When triggered, the distributor
+                ; will not accept any new requests until the overload has
+                ; cleared.
+                ; "global": (default) Any taskprocessor overload will trigger.
+                ; "pjsip_only": Only pjsip taskprocessor overloads will trigger.
+                ; "none":  No overload detection will be performed.
+                ; WARNING: The "none" and "pjsip_only" options should be used
+                ; with extreme caution and only to mitigate specific issues.
+                ; Under certain conditions they could make things worse.
+
 ; MODULE PROVIDING BELOW SECTION(S): res_pjsip_acl
 ;==========================ACL SECTION OPTIONS=========================
 ;[acl]
@@ -1095,9 +1196,15 @@
 ; MODULE PROVIDING BELOW SECTION(S): res_pjsip_endpoint_identifier_ip
 ;==========================IDENTIFY SECTION OPTIONS=========================
 ;[identify]
-;  SYNOPSIS: Identifies endpoints via source IP address
-;endpoint=      ; Name of Endpoint (default: "")
-;match= ; IP addresses or networks to match against (default: "")
+;  SYNOPSIS: Identifies endpoints via some criteria.
+;
+; NOTE: If multiple matching criteria are provided then an inbound request will
+; be matched to the endpoint if it matches ANY of the criteria.
+;endpoint=      ; Name of endpoint identified (default: "")
+;srv_lookups=yes        ; Perform SRV lookups for provided hostnames. (default: yes)
+;match= ; Comma separated list of IP addresses, networks, or hostnames to match
+        ; against (default: "")
+;match_header= ; SIP header with specified value to match against (default: "")
 ;type=  ; Must be of type identify (default: "")
 
 
@@ -1117,7 +1224,7 @@
 
 
 ; MODULE PROVIDING BELOW SECTION(S): res_pjsip_outbound_publish
-;======================OUTBOUND_PUBLISHEN SECTION OPTIONS=====================
+;======================OUTBOUND_PUBLISH SECTION OPTIONS=====================
 ; See https://wiki.asterisk.org/wiki/display/AST/Publishing+Extension+State
 ; for more information.
 ;[outbound-publish]
@@ -1127,7 +1234,7 @@
 
 ;outbound_auth=            ; Authentication object(s) to be used for outbound
                            ; publishes.
-                           ; This is a comma-delimited list of auth	sections
+                           ; This is a comma-delimited list of auth sections
                            ; defined in pjsip.conf used to respond to outbound
                            ; authentication challenges.
                            ; Using the same auth section for inbound and

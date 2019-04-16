@@ -314,7 +314,7 @@
 				<parameter name="ReceivedChallenge" required="false">
 					<para>The challenge that was received.</para>
 				</parameter>
-				<parameter name="RecievedHash" required="false">
+				<parameter name="ReceivedHash" required="false">
 					<para>The hash that was received.</para>
 				</parameter>
 			</syntax>
@@ -486,7 +486,7 @@ int ast_security_stasis_init(void)
 {
 	ast_register_cleanup(security_stasis_cleanup);
 
-	security_topic = stasis_topic_create("ast_security");
+	security_topic = stasis_topic_create("security:all");
 	if (!security_topic) {
 		return -1;
 	}
@@ -1196,5 +1196,3 @@ int ast_security_event_report(const struct ast_security_event_common *sec)
 
 	return 0;
 }
-
-

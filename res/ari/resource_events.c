@@ -23,6 +23,11 @@
  * \author David M. Lee, II <dlee@digium.com>
  */
 
+/*** MODULEINFO
+	<depend type="module">res_http_websocket</depend>
+	<support_level>core</support_level>
+ ***/
+
 #include "asterisk.h"
 
 ASTERISK_FILE_VERSION(__FILE__, "$Revision$")
@@ -123,7 +128,7 @@ static void app_handler(void *data, const char *app_name,
 	if (!session) {
 		return;
 	}
- 
+
 	/* Determine if we've been replaced */
 	if (strcmp(msg_type, "ApplicationReplaced") == 0 &&
 		strcmp(msg_application, app_name) == 0) {
@@ -138,7 +143,7 @@ static void app_handler(void *data, const char *app_name,
 	}
 
 	ao2_lock(session);
-	if (session->ws_session) {
+	if (session->ws_session && stasis_app_event_allowed(app_name, message)) {
 		if (stasis_app_get_debug_by_name(app_name)) {
 			char *str = ast_json_dump_string_format(message, ast_ari_json_format());
 
@@ -334,4 +339,3 @@ void ast_ari_events_user_event(struct ast_variable *headers,
 			"Error processing request");
 	}
 }
-

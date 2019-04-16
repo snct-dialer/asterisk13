@@ -49,6 +49,11 @@ CHAN_DAHDI_OBJS= \
 chan_dahdi.so: $(CHAN_DAHDI_OBJS)
 $(CHAN_DAHDI_OBJS): _ASTCFLAGS+=$(call MOD_ASTCFLAGS,chan_dahdi)
 
+chan_mgcp.o: _ASTCFLAGS+=$(AST_NO_FORMAT_TRUNCATION)
+chan_unistim.o: _ASTCFLAGS+=$(AST_NO_FORMAT_TRUNCATION)
+chan_phone.o: _ASTCFLAGS+=$(AST_NO_FORMAT_TRUNCATION)
+chan_sip.o: _ASTCFLAGS+=$(AST_NO_FORMAT_TRUNCATION)
+
 chan_misdn.o: _ASTCFLAGS+=-Imisdn
 
 misdn_config.o: _ASTCFLAGS+=-Imisdn
@@ -65,4 +70,3 @@ chan_usbradio.o: ./xpmr/xpmr.c ./xpmr/xpmr.h ./xpmr/xpmr_coef.h
 
 chan_usbradio.so: LIBS+=-lusb -lasound
 chan_usbradio.so: _ASTCFLAGS+=-DNDEBUG
-

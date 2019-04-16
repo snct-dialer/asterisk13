@@ -2040,7 +2040,7 @@ static void *do_idle_thread(void *v_pvt)
 	struct sig_pri_chan *pvt = v_pvt;
 	struct ast_channel *chan = pvt->owner;
 	struct ast_frame *f;
-	char ex[80];
+	char ex[128];
 	/* Wait up to 30 seconds for an answer */
 	int timeout_ms = 30000;
 	int ms;
@@ -2281,7 +2281,7 @@ static void sig_pri_party_name_convert(struct ast_party_name *ast_name, const st
  */
 static void sig_pri_party_number_convert(struct ast_party_number *ast_number, const struct pri_party_number *pri_number, struct sig_pri_span *pri)
 {
-	char number[AST_MAX_EXTENSION];
+	char number[AST_MAX_EXTENSION * 2];
 
 	apply_plan_to_existing_number(number, sizeof(number), pri, pri_number->str,
 		pri_number->plan);
@@ -6245,7 +6245,7 @@ static void *pri_dchannel(void *vpri)
 	struct timeval lastidle = { 0, 0 };
 	pthread_t p;
 	struct ast_channel *idle;
-	char idlen[80];
+	char idlen[128];
 	int nextidle = -1;
 	int haveidles;
 	int activeidles;
@@ -6651,7 +6651,7 @@ static void *pri_dchannel(void *vpri)
 						e->service_ack.changestatus, PRI_SPAN(e->service_ack.channel), PRI_CHANNEL(e->service_ack.channel), pri->span);
 				} else {
 					char db_chan_name[20];
-					char db_answer[5];
+					char db_answer[15];
 					int ch;
 					unsigned *why;
 
@@ -9143,6 +9143,9 @@ int sig_pri_start_pri(struct sig_pri_span *pri)
 		if (!pri->mbox[i].sub) {
 			ast_log(LOG_ERROR, "%s span %d could not subscribe to MWI events for %s(%s).\n",
 				sig_pri_cc_type_name, pri->span, pri->mbox[i].vm_box, mbox_id);
+		} else {
+			stasis_subscription_accept_message_type(pri->mbox[i].sub, ast_mwi_state_type());
+			stasis_subscription_set_filter(pri->mbox[i].sub, STASIS_SUBSCRIPTION_FILTER_SELECTIVE);
 		}
 #if defined(HAVE_PRI_MWI_V2)
 		if (ast_strlen_zero(pri->mbox[i].vm_number)) {
@@ -10143,8 +10146,8 @@ int sig_pri_load(const char *cc_type_name)
 
 #if defined(HAVE_PRI_CCSS)
 	sig_pri_cc_type_name = cc_type_name;
-	sig_pri_cc_monitors = ao2_container_alloc(37, sig_pri_cc_monitor_instance_hash_fn,
-		sig_pri_cc_monitor_instance_cmp_fn);
+	sig_pri_cc_monitors = ao2_container_alloc_hash(AO2_ALLOC_OPT_LOCK_MUTEX, 0, 37,
+		sig_pri_cc_monitor_instance_hash_fn, NULL, sig_pri_cc_monitor_instance_cmp_fn);
 	if (!sig_pri_cc_monitors) {
 		return -1;
 	}

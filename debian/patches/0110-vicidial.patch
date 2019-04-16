@@ -1,0 +1,13 @@
+Index: trunk/configure.ac
+===================================================================
+--- trunk.orig/configure.ac
++++ trunk/configure.ac
+@@ -45,7 +45,7 @@ AC_SUBST([astdbdir],          ['${astvar
+ AC_SUBST([astkeydir],         ['${astvarlibdir}'])dnl
+ AC_SUBST([astspooldir],       ['${localstatedir}/spool/asterisk'])dnl
+ AC_SUBST([astlogdir],         ['${localstatedir}/log/asterisk'])dnl
+-AC_SUBST([astvarrundir],      ['${localstatedir}/run/asterisk'])dnl
++AC_SUBST([astvarrundir],      ['/run/asterisk'])dnl
+ 
+ case "${host_os}" in
+      *bsd*)

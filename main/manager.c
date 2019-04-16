@@ -247,13 +247,15 @@ ASTERISK_FILE_VERSION(__FILE__, "$Revision$")
 				<parameter name="DNID">
 					<para>Dialed number identifier</para>
 				</parameter>
+				<parameter name="EffectiveConnectedLineNum">
+				</parameter>
+				<parameter name="EffectiveConnectedLineName">
+				</parameter>
 				<parameter name="TimeToHangup">
 					<para>Absolute lifetime of the channel</para>
 				</parameter>
 				<parameter name="BridgeID">
 					<para>Identifier of the bridge the channel is in, may be empty if not in one</para>
-				</parameter>
-				<parameter name="Linkedid">
 				</parameter>
 				<parameter name="Application">
 					<para>Application currently executing on the channel</para>
@@ -617,6 +619,25 @@ ASTERISK_FILE_VERSION(__FILE__, "$Revision$")
 		</syntax>
 		<description>
 			<para>Attended transfer.</para>
+		</description>
+		<see-also>
+			<ref type="managerEvent">AttendedTransfer</ref>
+		</see-also>
+	</manager>
+	<manager name="CancelAtxfer" language="en_US">
+		<synopsis>
+			Cancel an attended transfer.
+		</synopsis>
+		<syntax>
+			<xi:include xpointer="xpointer(/docs/manager[@name='Login']/syntax/parameter[@name='ActionID'])" />
+			<parameter name="Channel" required="true">
+				<para>The transferer channel.</para>
+			</parameter>
+		</syntax>
+		<description>
+			<para>Cancel an attended transfer. Note, this uses the configured cancel attended transfer
+			feature option (atxferabort) to cancel the transfer. If not available this action will fail.
+			</para>
 		</description>
 		<see-also>
 			<ref type="managerEvent">AttendedTransfer</ref>
@@ -1500,6 +1521,8 @@ static void acl_change_stasis_subscribe(void)
 	if (!acl_change_sub) {
 		acl_change_sub = stasis_subscribe(ast_security_topic(),
 			acl_change_stasis_cb, NULL);
+		stasis_subscription_accept_message_type(acl_change_sub, ast_named_acl_change_type());
+		stasis_subscription_set_filter(acl_change_sub, STASIS_SUBSCRIPTION_FILTER_SELECTIVE);
 	}
 }
 
@@ -1570,6 +1593,7 @@ struct mansession_session {
 	time_t noncetime;	/*!< Timer for nonce value expiration */
 	unsigned long oldnonce;	/*!< Stale nonce value */
 	unsigned long nc;	/*!< incremental  nonce counter */
+	ast_mutex_t notify_lock; /*!< Lock for notifying this session of events */
 	AST_LIST_HEAD_NOLOCK(mansession_datastores, ast_datastore) datastores; /*!< Data stores on the session */
 	AST_LIST_ENTRY(mansession_session) list;
 };
@@ -1630,8 +1654,10 @@ static AST_RWLIST_HEAD_STATIC(actions, manager_action);
 /*! \brief list of hooks registered */
 static AST_RWLIST_HEAD_STATIC(manager_hooks, manager_custom_hook);
 
+#ifdef AST_XML_DOCS
 /*! \brief A container of event documentation nodes */
 static AO2_GLOBAL_OBJ_STATIC(event_docs);
+#endif
 
 static int __attribute__((format(printf, 9, 0))) __manager_event_sessions(
 	struct ao2_container *sessions,
@@ -1743,7 +1769,12 @@ void manager_json_to_ast_str(struct ast_json *obj, const char *key,
 {
 	struct ast_json_iter *i;
 
-	if (!obj || (!res && !(*res) && (!(*res = ast_str_create(1024))))) {
+	/* If obj or res is not given, just return */
+	if (!obj || !res) {
+		return;
+	}
+
+	if (!*res && !(*res = ast_str_create(1024))) {
 		return;
 	}
 
@@ -1774,11 +1805,14 @@ void manager_json_to_ast_str(struct ast_json *obj, const char *key,
 	}
 }
 
-
 struct ast_str *ast_manager_str_from_json_object(struct ast_json *blob, key_exclusion_cb exclusion_cb)
 {
 	struct ast_str *res = ast_str_create(1024);
-	manager_json_to_ast_str(blob, NULL, &res, exclusion_cb);
+
+	if (!ast_json_is_null(blob)) {
+	   manager_json_to_ast_str(blob, NULL, &res, exclusion_cb);
+	}
+
 	return res;
 }
 
@@ -2178,6 +2212,8 @@ static void session_destructor(void *obj)
 	if (session->blackfilters) {
 		ao2_t_ref(session->blackfilters, -1, "decrement ref for black container, should be last one");
 	}
+
+	ast_mutex_destroy(&session->notify_lock);
 }
 
 /*! \brief Allocate manager session structure and add it to the list of sessions */
@@ -2191,8 +2227,8 @@ static struct mansession_session *build_mansession(const struct ast_sockaddr *ad
 		return NULL;
 	}
 
-	newsession->whitefilters = ao2_container_alloc(1, NULL, NULL);
-	newsession->blackfilters = ao2_container_alloc(1, NULL, NULL);
+	newsession->whitefilters = ao2_container_alloc_list(AO2_ALLOC_OPT_LOCK_MUTEX, 0, NULL, NULL);
+	newsession->blackfilters = ao2_container_alloc_list(AO2_ALLOC_OPT_LOCK_MUTEX, 0, NULL, NULL);
 	if (!newsession->whitefilters || !newsession->blackfilters) {
 		ao2_ref(newsession, -1);
 		return NULL;
@@ -2203,6 +2239,8 @@ static struct mansession_session *build_mansession(const struct ast_sockaddr *ad
 	newsession->writetimeout = 100;
 	newsession->send_events = -1;
 	ast_sockaddr_copy(&newsession->addr, addr);
+
+	ast_mutex_init(&newsession->notify_lock);
 
 	sessions = ao2_global_obj_ref(mgr_sessions);
 	if (sessions) {
@@ -2287,15 +2325,17 @@ static int manager_displayconnects(struct mansession_session *session)
 	return ret;
 }
 
+#ifdef AST_XML_DOCS
 static void print_event_instance(struct ast_cli_args *a, struct ast_xml_doc_item *instance);
+#endif
 
 static char *handle_showmancmd(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a)
 {
 	struct manager_action *cur;
 	struct ast_str *authority;
-	int num, l, which;
+	int num;
+	int l;
 	const char *auth_str;
-	char *ret = NULL;
 #ifdef AST_XML_DOCS
 	char syntax_title[64], description_title[64], synopsis_title[64], seealso_title[64];
 	char arguments_title[64], privilege_title[64], final_response_title[64], list_responses_title[64];
@@ -2310,21 +2350,22 @@ static char *handle_showmancmd(struct ast_cli_entry *e, int cmd, struct ast_cli_
 		return NULL;
 	case CLI_GENERATE:
 		l = strlen(a->word);
-		which = 0;
 		AST_RWLIST_RDLOCK(&actions);
 		AST_RWLIST_TRAVERSE(&actions, cur, list) {
-			if (!strncasecmp(a->word, cur->action, l) && ++which > a->n) {
-				ret = ast_strdup(cur->action);
-				break;	/* make sure we exit even if ast_strdup() returns NULL */
+			if (!strncasecmp(a->word, cur->action, l)) {
+				if (ast_cli_completion_add(ast_strdup(cur->action))) {
+					break;
+				}
 			}
 		}
 		AST_RWLIST_UNLOCK(&actions);
-		return ret;
+		return NULL;
 	}
-	authority = ast_str_alloca(MAX_AUTH_PERM_STRING);
 	if (a->argc < 4) {
 		return CLI_SHOWUSAGE;
 	}
+
+	authority = ast_str_alloca(MAX_AUTH_PERM_STRING);
 
 #ifdef AST_XML_DOCS
 	/* setup the titles */
@@ -2353,6 +2394,22 @@ static char *handle_showmancmd(struct ast_cli_entry *e, int cmd, struct ast_cli_
 					char *seealso = ast_xmldoc_printable(S_OR(cur->seealso, "Not available"), 1);
 					char *privilege = ast_xmldoc_printable(S_OR(auth_str, "Not available"), 1);
 					char *responses = ast_xmldoc_printable("None", 1);
+
+					if (!syntax || !synopsis || !description || !arguments
+							|| !seealso || !privilege || !responses) {
+						ast_free(syntax);
+						ast_free(synopsis);
+						ast_free(description);
+						ast_free(arguments);
+						ast_free(seealso);
+						ast_free(privilege);
+						ast_free(responses);
+						ast_cli(a->fd, "Allocation failure.\n");
+						AST_RWLIST_UNLOCK(&actions);
+
+						return CLI_FAILURE;
+					}
+
 					ast_cli(a->fd, "%s%s\n\n%s%s\n\n%s%s\n\n%s%s\n\n%s%s\n\n%s%s\n\n%s",
 						syntax_title, syntax,
 						synopsis_title, synopsis,
@@ -2380,6 +2437,14 @@ static char *handle_showmancmd(struct ast_cli_entry *e, int cmd, struct ast_cli_
 						ast_cli(a->fd, "Event: %s\n", cur->final_response->name);
 						print_event_instance(a, cur->final_response);
 					}
+
+					ast_free(syntax);
+					ast_free(synopsis);
+					ast_free(description);
+					ast_free(arguments);
+					ast_free(seealso);
+					ast_free(privilege);
+					ast_free(responses);
 				} else
 #endif
 				{
@@ -2424,8 +2489,7 @@ static char *handle_mandebug(struct ast_cli_entry *e, int cmd, struct ast_cli_ar
 static char *handle_showmanager(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a)
 {
 	struct ast_manager_user *user = NULL;
-	int l, which;
-	char *ret = NULL;
+	int l;
 	struct ast_str *rauthority = ast_str_alloca(MAX_AUTH_PERM_STRING);
 	struct ast_str *wauthority = ast_str_alloca(MAX_AUTH_PERM_STRING);
 	struct ast_variable *v;
@@ -2439,19 +2503,19 @@ static char *handle_showmanager(struct ast_cli_entry *e, int cmd, struct ast_cli
 		return NULL;
 	case CLI_GENERATE:
 		l = strlen(a->word);
-		which = 0;
 		if (a->pos != 3) {
 			return NULL;
 		}
 		AST_RWLIST_RDLOCK(&users);
 		AST_RWLIST_TRAVERSE(&users, user, list) {
-			if ( !strncasecmp(a->word, user->username, l) && ++which > a->n ) {
-				ret = ast_strdup(user->username);
-				break;
+			if (!strncasecmp(a->word, user->username, l)) {
+				if (ast_cli_completion_add(ast_strdup(user->username))) {
+					break;
+				}
 			}
 		}
 		AST_RWLIST_UNLOCK(&users);
-		return ret;
+		return NULL;
 	}
 
 	if (a->argc != 4) {
@@ -2743,6 +2807,34 @@ static const char *__astman_get_header(const struct message *m, char *var, int m
 const char *astman_get_header(const struct message *m, char *var)
 {
 	return __astman_get_header(m, var, GET_HEADER_FIRST_MATCH);
+}
+
+/*!
+ * \brief Append additional headers into the message structure from params.
+ *
+ * \note You likely want to initialize m->hdrcount to 0 before calling this.
+ */
+static void astman_append_headers(struct message *m, const struct ast_variable *params)
+{
+	const struct ast_variable *v;
+
+	for (v = params; v && m->hdrcount < ARRAY_LEN(m->headers); v = v->next) {
+		if (ast_asprintf((char**)&m->headers[m->hdrcount], "%s: %s", v->name, v->value) > -1) {
+			++m->hdrcount;
+		}
+	}
+}
+
+/*!
+ * \brief Free headers inside message structure, but not the message structure itself.
+ */
+static void astman_free_headers(struct message *m)
+{
+	while (m->hdrcount) {
+		--m->hdrcount;
+		ast_free((void *) m->headers[m->hdrcount]);
+		m->headers[m->hdrcount] = NULL;
+	}
 }
 
 /*!
@@ -4063,10 +4155,13 @@ static int action_waitevent(struct mansession *s, const struct message *m)
 		/* XXX maybe put an upper bound, or prevent the use of 0 ? */
 	}
 
-	ao2_lock(s->session);
+	ast_mutex_lock(&s->session->notify_lock);
 	if (s->session->waiting_thread != AST_PTHREADT_NULL) {
 		pthread_kill(s->session->waiting_thread, SIGURG);
 	}
+	ast_mutex_unlock(&s->session->notify_lock);
+
+	ao2_lock(s->session);
 
 	if (s->session->managerid) { /* AMI-over-HTTP session */
 		/*
@@ -4089,8 +4184,9 @@ static int action_waitevent(struct mansession *s, const struct message *m)
 	}
 	ao2_unlock(s->session);
 
-	/* XXX should this go inside the lock ? */
+	ast_mutex_lock(&s->session->notify_lock);
 	s->session->waiting_thread = pthread_self();	/* let new events wake up this thread */
+	ast_mutex_unlock(&s->session->notify_lock);
 	ast_debug(1, "Starting waiting for an event!\n");
 
 	for (x = 0; x < timeout || timeout < 0; x++) {
@@ -4098,17 +4194,19 @@ static int action_waitevent(struct mansession *s, const struct message *m)
 		if (AST_RWLIST_NEXT(s->session->last_ev, eq_next)) {
 			needexit = 1;
 		}
-		/* We can have multiple HTTP session point to the same mansession entry.
-		 * The way we deal with it is not very nice: newcomers kick out the previous
-		 * HTTP session. XXX this needs to be improved.
-		 */
-		if (s->session->waiting_thread != pthread_self()) {
-			needexit = 1;
-		}
 		if (s->session->needdestroy) {
 			needexit = 1;
 		}
 		ao2_unlock(s->session);
+		/* We can have multiple HTTP session point to the same mansession entry.
+		 * The way we deal with it is not very nice: newcomers kick out the previous
+		 * HTTP session. XXX this needs to be improved.
+		 */
+		ast_mutex_lock(&s->session->notify_lock);
+		if (s->session->waiting_thread != pthread_self()) {
+			needexit = 1;
+		}
+		ast_mutex_unlock(&s->session->notify_lock);
 		if (needexit) {
 			break;
 		}
@@ -4122,9 +4220,14 @@ static int action_waitevent(struct mansession *s, const struct message *m)
 	}
 	ast_debug(1, "Finished waiting for an event!\n");
 
-	ao2_lock(s->session);
+	ast_mutex_lock(&s->session->notify_lock);
 	if (s->session->waiting_thread == pthread_self()) {
 		struct eventqent *eqe = s->session->last_ev;
+
+		s->session->waiting_thread = AST_PTHREADT_NULL;
+		ast_mutex_unlock(&s->session->notify_lock);
+
+		ao2_lock(s->session);
 		astman_send_response(s, m, "Success", "Waiting for Event completed.");
 		while ((eqe = advance_event(eqe))) {
 			if (((s->session->readperm & eqe->category) == eqe->category)
@@ -4138,11 +4241,11 @@ static int action_waitevent(struct mansession *s, const struct message *m)
 			"Event: WaitEventComplete\r\n"
 			"%s"
 			"\r\n", idText);
-		s->session->waiting_thread = AST_PTHREADT_NULL;
+		ao2_unlock(s->session);
 	} else {
+		ast_mutex_unlock(&s->session->notify_lock);
 		ast_debug(1, "Abandoning event request!\n");
 	}
-	ao2_unlock(s->session);
 
 	return 0;
 }
@@ -4535,6 +4638,7 @@ static int action_status(struct mansession *s, const struct message *m)
 		struct timeval now;
 		long elapsed_seconds;
 		struct ast_bridge *bridge;
+		struct ast_party_id effective_id;
 
 		ast_channel_lock(chan);
 
@@ -4563,10 +4667,12 @@ static int action_status(struct mansession *s, const struct message *m)
 		channels++;
 
 		bridge = ast_channel_get_bridge(chan);
+		effective_id = ast_channel_connected_effective_id(chan);
 
 		astman_append(s,
 			"Event: Status\r\n"
 			"Privilege: Call\r\n"
+			/* v-- Start channel snapshot headers */
 			"Channel: %s\r\n"
 			"ChannelState: %u\r\n"
 			"ChannelStateDesc: %s\r\n"
@@ -4579,13 +4685,14 @@ static int action_status(struct mansession *s, const struct message *m)
 			"Exten: %s\r\n"
 			"Priority: %d\r\n"
 			"Uniqueid: %s\r\n"
+			"Linkedid: %s\r\n"
+			/* ^-- End channel snapshot headers */
 			"Type: %s\r\n"
 			"DNID: %s\r\n"
 			"EffectiveConnectedLineNum: %s\r\n"
 			"EffectiveConnectedLineName: %s\r\n"
 			"TimeToHangup: %ld\r\n"
 			"BridgeID: %s\r\n"
-			"Linkedid: %s\r\n"
 			"Application: %s\r\n"
 			"Data: %s\r\n"
 			"Nativeformats: %s\r\n"
@@ -4599,6 +4706,7 @@ static int action_status(struct mansession *s, const struct message *m)
 			"%s"
 			"%s"
 			"\r\n",
+			/* v-- Start channel snapshot headers */
 			ast_channel_name(chan),
 			ast_channel_state(chan),
 			ast_state2str(ast_channel_state(chan)),
@@ -4611,13 +4719,14 @@ static int action_status(struct mansession *s, const struct message *m)
 			ast_channel_exten(chan),
 			ast_channel_priority(chan),
 			ast_channel_uniqueid(chan),
+			ast_channel_linkedid(chan),
+			/* ^-- End channel snapshot headers */
 			ast_channel_tech(chan)->type,
 			S_OR(ast_channel_dialed(chan)->number.str, ""),
-			S_COR(ast_channel_connected_effective_id(chan).number.valid, ast_channel_connected_effective_id(chan).number.str, "<unknown>"),
-			S_COR(ast_channel_connected_effective_id(chan).name.valid, ast_channel_connected_effective_id(chan).name.str, "<unknown>"),
+			S_COR(effective_id.number.valid, effective_id.number.str, "<unknown>"),
+			S_COR(effective_id.name.valid, effective_id.name.str, "<unknown>"),
 			(long)ast_channel_whentohangup(chan)->tv_sec,
 			bridge ? bridge->uniqueid : "",
-			ast_channel_linkedid(chan),
 			ast_channel_appl(chan),
 			ast_channel_data(chan),
 			ast_format_cap_get_names(ast_channel_nativeformats(chan), &codec_buf),
@@ -4652,10 +4761,13 @@ static int action_status(struct mansession *s, const struct message *m)
 
 static int action_sendtext(struct mansession *s, const struct message *m)
 {
-	struct ast_channel *c = NULL;
+	struct ast_channel *c;
 	const char *name = astman_get_header(m, "Channel");
 	const char *textmsg = astman_get_header(m, "Message");
-	int res = 0;
+	struct ast_control_read_action_payload *frame_payload;
+	int payload_size;
+	int frame_size;
+	int res;
 
 	if (ast_strlen_zero(name)) {
 		astman_send_error(s, m, "No channel specified");
@@ -4667,13 +4779,29 @@ static int action_sendtext(struct mansession *s, const struct message *m)
 		return 0;
 	}
 
-	if (!(c = ast_channel_get_by_name(name))) {
+	c = ast_channel_get_by_name(name);
+	if (!c) {
 		astman_send_error(s, m, "No such channel");
 		return 0;
 	}
 
-	res = ast_sendtext(c, textmsg);
-	c = ast_channel_unref(c);
+	payload_size = strlen(textmsg) + 1;
+	frame_size = payload_size + sizeof(*frame_payload);
+
+	frame_payload = ast_malloc(frame_size);
+	if (!frame_payload) {
+		ast_channel_unref(c);
+		astman_send_error(s, m, "Failure");
+		return 0;
+	}
+
+	frame_payload->action = AST_FRAME_READ_ACTION_SEND_TEXT;
+	frame_payload->payload_size = payload_size;
+	memcpy(frame_payload->payload, textmsg, payload_size);
+	res = ast_queue_control_data(c, AST_CONTROL_READ_ACTION, frame_payload, frame_size);
+
+	ast_free(frame_payload);
+	ast_channel_unref(c);
 
 	if (res >= 0) {
 		astman_send_ack(s, m, "Success");
@@ -4929,6 +5057,47 @@ static int action_atxfer(struct mansession *s, const struct message *m)
 
 	return 0;
 }
+
+static int action_cancel_atxfer(struct mansession *s, const struct message *m)
+{
+	const char *name = astman_get_header(m, "Channel");
+	struct ast_channel *chan = NULL;
+	char *feature_code;
+	const char *digit;
+
+	if (ast_strlen_zero(name)) {
+		astman_send_error(s, m, "No channel specified");
+		return 0;
+	}
+
+	if (!(chan = ast_channel_get_by_name(name))) {
+		astman_send_error(s, m, "Channel specified does not exist");
+		return 0;
+	}
+
+	ast_channel_lock(chan);
+	feature_code = ast_get_chan_features_atxferabort(chan);
+	ast_channel_unlock(chan);
+
+	if (!feature_code) {
+		astman_send_error(s, m, "No disconnect feature code found");
+		ast_channel_unref(chan);
+		return 0;
+	}
+
+	for (digit = feature_code; *digit; ++digit) {
+		struct ast_frame f = { AST_FRAME_DTMF, .subclass.integer = *digit };
+		ast_queue_frame(chan, &f);
+	}
+	ast_free(feature_code);
+
+	chan = ast_channel_unref(chan);
+
+	astman_send_ack(s, m, "CancelAtxfer successfully queued");
+
+	return 0;
+}
+
 
 static int check_blacklist(const char *cmd)
 {
@@ -6081,7 +6250,7 @@ static int action_coreshowchannels(struct mansession *s, const struct message *m
 	for (; (msg = ao2_iterator_next(&it_chans)); ao2_ref(msg, -1)) {
 		struct ast_channel_snapshot *cs = stasis_message_data(msg);
 		struct ast_str *built = ast_manager_build_channel_state_string_prefix(cs, "");
-		char durbuf[10] = "";
+		char durbuf[16] = "";
 
 		if (!built) {
 			continue;
@@ -6427,20 +6596,20 @@ static int get_input(struct mansession *s, char *output)
 			}
 		}
 
-		ao2_lock(s->session);
+		ast_mutex_lock(&s->session->notify_lock);
 		if (s->session->pending_event) {
 			s->session->pending_event = 0;
-			ao2_unlock(s->session);
+			ast_mutex_unlock(&s->session->notify_lock);
 			return 0;
 		}
 		s->session->waiting_thread = pthread_self();
-		ao2_unlock(s->session);
+		ast_mutex_unlock(&s->session->notify_lock);
 
 		res = ast_wait_for_input(s->session->fd, timeout);
 
-		ao2_lock(s->session);
+		ast_mutex_lock(&s->session->notify_lock);
 		s->session->waiting_thread = AST_PTHREADT_NULL;
-		ao2_unlock(s->session);
+		ast_mutex_unlock(&s->session->notify_lock);
 	}
 	if (res < 0) {
 		/* If we get a signal from some other thread (typically because
@@ -6503,7 +6672,6 @@ static int do_message(struct mansession *s)
 	struct message m = { 0 };
 	char header_buf[sizeof(s->session->inbuf)] = { '\0' };
 	int res;
-	int idx;
 	int hdr_loss;
 	time_t now;
 
@@ -6571,10 +6739,8 @@ static int do_message(struct mansession *s)
 		}
 	}
 
-	/* Free AMI request headers. */
-	for (idx = 0; idx < m.hdrcount; ++idx) {
-		ast_free((void *) m.headers[idx]);
-	}
+	astman_free_headers(&m);
+
 	return res;
 }
 
@@ -6620,9 +6786,7 @@ static void *session_do(void *data)
 	}
 
 	/* make sure socket is non-blocking */
-	flags = fcntl(ser->fd, F_GETFL);
-	flags |= O_NONBLOCK;
-	fcntl(ser->fd, F_SETFL, flags);
+	ast_fd_set_flags(ser->fd, O_NONBLOCK);
 
 	ao2_lock(session);
 	/* Hook to the tail of the event queue */
@@ -6837,7 +7001,7 @@ static int __attribute__((format(printf, 9, 0))) __manager_event_sessions_va(
 
 		iter = ao2_iterator_init(sessions, 0);
 		while ((session = ao2_iterator_next(&iter))) {
-			ao2_lock(session);
+			ast_mutex_lock(&session->notify_lock);
 			if (session->waiting_thread != AST_PTHREADT_NULL) {
 				pthread_kill(session->waiting_thread, SIGURG);
 			} else {
@@ -6848,7 +7012,7 @@ static int __attribute__((format(printf, 9, 0))) __manager_event_sessions_va(
 				 */
 				session->pending_event = 1;
 			}
-			ao2_unlock(session);
+			ast_mutex_unlock(&session->notify_lock);
 			unref_mansession(session);
 		}
 		ao2_iterator_destroy(&iter);
@@ -7464,7 +7628,8 @@ static void xml_translate(struct ast_str **out, char *in, struct ast_variable *g
 			if (xml) {
 				ast_str_append(out, 0, "<response type='object' id='%s'><%s", dest, objtype);
 			}
-			vco = ao2_container_alloc(37, variable_count_hash_fn, variable_count_cmp_fn);
+			vco = ao2_container_alloc_hash(AO2_ALLOC_OPT_LOCK_MUTEX, 0, 37,
+				variable_count_hash_fn, NULL, variable_count_cmp_fn);
 			inobj = 1;
 		}
 
@@ -7585,13 +7750,10 @@ static int generic_http_callback(struct ast_tcptls_session_instance *ser,
 	struct mansession_session *session = NULL;
 	uint32_t ident;
 	int blastaway = 0;
-	struct ast_variable *v;
 	struct ast_variable *params = get_params;
 	char template[] = "/tmp/ast-http-XXXXXX";	/* template for temporary file */
 	struct ast_str *http_header = NULL, *out = NULL;
 	struct message m = { 0 };
-	unsigned int idx;
-	size_t hdrlen;
 
 	if (method != AST_HTTP_GET && method != AST_HTTP_HEAD && method != AST_HTTP_POST) {
 		ast_http_error(ser, 501, "Not Implemented", "Attempt to use unimplemented / unsupported method");
@@ -7674,17 +7836,7 @@ static int generic_http_callback(struct ast_tcptls_session_instance *ser,
 		}
 	}
 
-	for (v = params; v && m.hdrcount < ARRAY_LEN(m.headers); v = v->next) {
-		hdrlen = strlen(v->name) + strlen(v->value) + 3;
-		m.headers[m.hdrcount] = ast_malloc(hdrlen);
-		if (!m.headers[m.hdrcount]) {
-			/* Allocation failure */
-			continue;
-		}
-		snprintf((char *) m.headers[m.hdrcount], hdrlen, "%s: %s", v->name, v->value);
-		ast_debug(1, "HTTP Manager add header %s\n", m.headers[m.hdrcount]);
-		++m.hdrcount;
-	}
+	astman_append_headers(&m, params);
 
 	if (process_message(&s, &m)) {
 		if (session->authenticated) {
@@ -7699,11 +7851,7 @@ static int generic_http_callback(struct ast_tcptls_session_instance *ser,
 		session->needdestroy = 1;
 	}
 
-	/* Free request headers. */
-	for (idx = 0; idx < m.hdrcount; ++idx) {
-		ast_free((void *) m.headers[idx]);
-		m.headers[idx] = NULL;
-	}
+	astman_free_headers(&m);
 
 	ast_str_append(&http_header, 0,
 		"Content-type: text/%s\r\n"
@@ -7760,9 +7908,11 @@ static int generic_http_callback(struct ast_tcptls_session_instance *ser,
 			blastaway = 1;
 		} else {
 			ast_debug(1, "Need destroy, but can't do it yet!\n");
+			ast_mutex_lock(&session->notify_lock);
 			if (session->waiting_thread != AST_PTHREADT_NULL) {
 				pthread_kill(session->waiting_thread, SIGURG);
 			}
+			ast_mutex_unlock(&session->notify_lock);
 			session->inuse--;
 		}
 	} else {
@@ -7814,8 +7964,6 @@ static int auth_http_callback(struct ast_tcptls_session_instance *ser,
 	struct ast_str *http_header = NULL, *out = NULL;
 	size_t result_size;
 	struct message m = { 0 };
-	unsigned int idx;
-	size_t hdrlen;
 
 	time_t time_now = time(NULL);
 	unsigned long nonce = 0, nc;
@@ -7886,13 +8034,21 @@ static int auth_http_callback(struct ast_tcptls_session_instance *ser,
 
 	/* compute the expected response to compare with what we received */
 	{
-		char a2[256];
-		char a2_hash[256];
+		char *a2;
+		/* ast_md5_hash outputs 32 characters plus NULL terminator. */
+		char a2_hash[33];
 		char resp[256];
 
 		/* XXX Now request method are hardcoded in A2 */
-		snprintf(a2, sizeof(a2), "%s:%s", ast_get_http_method(method), d.uri);
+		if (ast_asprintf(&a2, "%s:%s", ast_get_http_method(method), d.uri) < 0) {
+			AST_RWLIST_UNLOCK(&users);
+			ast_http_request_close_on_completion(ser);
+			ast_http_error(ser, 500, "Server Error", "Internal Server Error (out of memory)");
+			return 0;
+		}
+
 		ast_md5_hash(a2_hash, a2);
+		ast_free(a2);
 
 		if (d.qop) {
 			/* RFC 2617 */
@@ -8029,17 +8185,7 @@ static int auth_http_callback(struct ast_tcptls_session_instance *ser,
 		}
 	}
 
-	for (v = params; v && m.hdrcount < ARRAY_LEN(m.headers); v = v->next) {
-		hdrlen = strlen(v->name) + strlen(v->value) + 3;
-		m.headers[m.hdrcount] = ast_malloc(hdrlen);
-		if (!m.headers[m.hdrcount]) {
-			/* Allocation failure */
-			continue;
-		}
-		snprintf((char *) m.headers[m.hdrcount], hdrlen, "%s: %s", v->name, v->value);
-		ast_verb(4, "HTTP Manager add header %s\n", m.headers[m.hdrcount]);
-		++m.hdrcount;
-	}
+	astman_append_headers(&m, params);
 
 	if (process_message(&s, &m)) {
 		if (u_displayconnects) {
@@ -8049,11 +8195,7 @@ static int auth_http_callback(struct ast_tcptls_session_instance *ser,
 		session->needdestroy = 1;
 	}
 
-	/* Free request headers. */
-	for (idx = 0; idx < m.hdrcount; ++idx) {
-		ast_free((void *) m.headers[idx]);
-		m.headers[idx] = NULL;
-	}
+	astman_free_headers(&m);
 
 	result_size = ftell(s.f); /* Calculate approx. size of result */
 
@@ -8375,7 +8517,7 @@ static char *handle_manager_show_settings(struct ast_cli_entry *e, int cmd, stru
 	ast_cli(a->fd, FORMAT, "Manager (AMI):", AST_CLI_YESNO(manager_enabled));
 	ast_cli(a->fd, FORMAT, "Web Manager (AMI/HTTP):", AST_CLI_YESNO(webmanager_enabled));
 	ast_cli(a->fd, FORMAT, "TCP Bindaddress:", manager_enabled != 0 ? ast_sockaddr_stringify(&ami_desc.local_address) : "Disabled");
-	ast_cli(a->fd, FORMAT2, "HTTP Timeout (minutes):", httptimeout);
+	ast_cli(a->fd, FORMAT2, "HTTP Timeout (seconds):", httptimeout);
 	ast_cli(a->fd, FORMAT, "TLS Enable:", AST_CLI_YESNO(ami_tls_cfg.enabled));
 	ast_cli(a->fd, FORMAT, "TLS Bindaddress:", ami_tls_cfg.enabled != 0 ? ast_sockaddr_stringify(&amis_desc.local_address) : "Disabled");
 	ast_cli(a->fd, FORMAT, "TLS Certfile:", ami_tls_cfg.certfile);
@@ -8525,8 +8667,6 @@ static char *handle_manager_show_event(struct ast_cli_entry *e, int cmd, struct 
 	struct ao2_iterator it_events;
 	struct ast_xml_doc_item *item, *temp;
 	int length;
-	int which;
-	char *match = NULL;
 
 	if (cmd == CLI_INIT) {
 		e->command = "manager show event";
@@ -8543,19 +8683,24 @@ static char *handle_manager_show_event(struct ast_cli_entry *e, int cmd, struct 
 	}
 
 	if (cmd == CLI_GENERATE) {
+		if (a->pos != 3) {
+			return NULL;
+		}
+
 		length = strlen(a->word);
-		which = 0;
 		it_events = ao2_iterator_init(events, 0);
 		while ((item = ao2_iterator_next(&it_events))) {
-			if (!strncasecmp(a->word, item->name, length) && ++which > a->n) {
-				match = ast_strdup(item->name);
-				ao2_ref(item, -1);
-				break;
+			if (!strncasecmp(a->word, item->name, length)) {
+				if (ast_cli_completion_add(ast_strdup(item->name))) {
+					ao2_ref(item, -1);
+					break;
+				}
 			}
 			ao2_ref(item, -1);
 		}
 		ao2_iterator_destroy(&it_events);
-		return match;
+
+		return NULL;
 	}
 
 	if (a->argc != 4) {
@@ -8665,6 +8810,7 @@ static void manager_shutdown(void)
 	ast_manager_unregister("ListCategories");
 	ast_manager_unregister("Redirect");
 	ast_manager_unregister("Atxfer");
+	ast_manager_unregister("CancelAtxfer");
 	ast_manager_unregister("Originate");
 	ast_manager_unregister("Command");
 	ast_manager_unregister("ExtensionState");
@@ -8759,8 +8905,8 @@ static int manager_subscriptions_init(void)
 	stasis_message_router_set_congestion_limits(stasis_router, -1,
 		6 * AST_TASKPROCESSOR_HIGH_WATER_LEVEL);
 
-	res |= stasis_message_router_set_default(stasis_router,
-		manager_default_msg_cb, NULL);
+	stasis_message_router_set_formatters_default(stasis_router,
+		manager_default_msg_cb, NULL, STASIS_SUBSCRIPTION_FORMATTER_AMI);
 
 	res |= stasis_message_router_add(stasis_router,
 		ast_manager_get_generic_type(), manager_generic_msg_cb, NULL);
@@ -8858,7 +9004,7 @@ static int __init_manager(int reload, int by_external_config)
 		if (res != 0) {
 			return -1;
 		}
-		manager_topic = stasis_topic_create("manager_topic");
+		manager_topic = stasis_topic_create("manager:core");
 		if (!manager_topic) {
 			return -1;
 		}
@@ -8880,6 +9026,7 @@ static int __init_manager(int reload, int by_external_config)
 		ast_manager_register_xml_core("ListCategories", EVENT_FLAG_CONFIG, action_listcategories);
 		ast_manager_register_xml_core("Redirect", EVENT_FLAG_CALL, action_redirect);
 		ast_manager_register_xml_core("Atxfer", EVENT_FLAG_CALL, action_atxfer);
+		ast_manager_register_xml_core("CancelAtxfer", EVENT_FLAG_CALL, action_cancel_atxfer);
 		ast_manager_register_xml_core("Originate", EVENT_FLAG_ORIGINATE, action_originate);
 		ast_manager_register_xml_core("Command", EVENT_FLAG_COMMAND, action_command);
 		ast_manager_register_xml_core("ExtensionState", EVENT_FLAG_CALL | EVENT_FLAG_REPORTING, action_extensionstate);
@@ -8924,7 +9071,7 @@ static int __init_manager(int reload, int by_external_config)
 #endif
 
 		/* If you have a NULL hash fn, you only need a single bucket */
-		sessions = ao2_container_alloc(1, NULL, mansession_cmp_fn);
+		sessions = ao2_container_alloc_list(AO2_ALLOC_OPT_LOCK_MUTEX, 0, NULL, mansession_cmp_fn);
 		if (!sessions) {
 			return -1;
 		}
@@ -9180,8 +9327,8 @@ static int __init_manager(int reload, int by_external_config)
 			/* Default allowmultiplelogin from [general] */
 			user->allowmultiplelogin = allowmultiplelogin;
 			user->writetimeout = 100;
-			user->whitefilters = ao2_container_alloc(1, NULL, NULL);
-			user->blackfilters = ao2_container_alloc(1, NULL, NULL);
+			user->whitefilters = ao2_container_alloc_list(AO2_ALLOC_OPT_LOCK_MUTEX, 0, NULL, NULL);
+			user->blackfilters = ao2_container_alloc_list(AO2_ALLOC_OPT_LOCK_MUTEX, 0, NULL, NULL);
 			if (!user->whitefilters || !user->blackfilters) {
 				manager_free_user(user);
 				break;
@@ -9378,23 +9525,16 @@ struct ast_datastore *astman_datastore_find(struct mansession *s, const struct a
 }
 
 int ast_str_append_event_header(struct ast_str **fields_string,
-					const char *header, const char *value)
+	const char *header, const char *value)
 {
-	struct ast_str *working_str = *fields_string;
-
-	if (!working_str) {
-		working_str = ast_str_create(128);
-		if (!working_str) {
+	if (!*fields_string) {
+		*fields_string = ast_str_create(128);
+		if (!*fields_string) {
 			return -1;
 		}
-		*fields_string = working_str;
 	}
 
-	ast_str_append(&working_str, 0,
-		"%s: %s\r\n",
-		header, value);
-
-	return 0;
+	return (ast_str_append(fields_string, 0, "%s: %s\r\n", header, value) < 0) ? -1 : 0;
 }
 
 static void manager_event_blob_dtor(void *obj)

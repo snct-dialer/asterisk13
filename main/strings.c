@@ -247,6 +247,15 @@ char *ast_generate_random_string(char *buf, size_t size)
 	return buf;
 }
 
+int ast_strings_equal(const char *str1, const char *str2)
+{
+	if (!str1 || !str2) {
+		return 0;
+	}
+
+	return str1 == str2 || !strcmp(str1, str2);
+}
+
 int ast_strings_match(const char *left, const char *op, const char *right)
 {
 	char *internal_op = (char *)op;
@@ -314,7 +323,7 @@ regex:
 	}
 
 equals:
-	scan_numeric = (sscanf(left, "%lf", &left_num) && sscanf(internal_right, "%lf", &right_num));
+	scan_numeric = (sscanf(left, "%lf", &left_num) > 0 && sscanf(internal_right, "%lf", &right_num) > 0);
 
 	if (internal_op[0] == '=') {
 		if (ast_strlen_zero(left) && ast_strlen_zero(internal_right)) {
@@ -371,4 +380,23 @@ equals:
 	return 0;
 }
 
+char *ast_read_line_from_buffer(char **buffer)
+{
+	char *start = *buffer;
 
+	if (!buffer || !*buffer || *(*buffer) == '\0') {
+		return NULL;
+	}
+
+	while (*(*buffer) && *(*buffer) != '\n' ) {
+		(*buffer)++;
+	}
+
+	*(*buffer) = '\0';
+	if (*(*buffer - 1) == '\r') {
+		*(*buffer - 1) = '\0';
+	}
+	(*buffer)++;
+
+	return start;
+}

@@ -184,10 +184,10 @@ static int rtp_glue_data_get(struct ast_channel *c0, struct rtp_glue_data *glue0
 		}
 	}
 	if (glue0->video.result == glue1->video.result && glue1->video.result == AST_RTP_GLUE_RESULT_REMOTE) {
-		if (glue0->cb->allow_vrtp_remote && !glue0->cb->allow_vrtp_remote(c0, glue1->audio.instance)) {
-			/* if the allow_vrtp_remote indicates that remote isn't allowed, revert to local bridge */
+		if (glue0->cb->allow_vrtp_remote && !glue0->cb->allow_vrtp_remote(c0, glue1->video.instance)) {
+			/* If the allow_vrtp_remote indicates that remote isn't allowed, revert to local bridge */
 			glue0->video.result = glue1->video.result = AST_RTP_GLUE_RESULT_LOCAL;
-		} else if (glue1->cb->allow_vrtp_remote && !glue1->cb->allow_vrtp_remote(c1, glue0->audio.instance)) {
+		} else if (glue1->cb->allow_vrtp_remote && !glue1->cb->allow_vrtp_remote(c1, glue0->video.instance)) {
 			glue0->video.result = glue1->video.result = AST_RTP_GLUE_RESULT_LOCAL;
 		}
 	}
@@ -541,10 +541,12 @@ static void native_rtp_bridge_stop(struct ast_bridge *bridge, struct ast_channel
 static struct ast_frame *native_rtp_framehook(struct ast_channel *chan,
 	struct ast_frame *f, enum ast_framehook_event event, void *data)
 {
-	RAII_VAR(struct ast_bridge *, bridge, NULL, ao2_cleanup);
+	struct ast_bridge *bridge;
 	struct native_rtp_framehook_data *native_data = data;
 
-	if (!f || (event != AST_FRAMEHOOK_EVENT_WRITE)) {
+	if (!f
+		|| f->frametype != AST_FRAME_CONTROL
+		|| event != AST_FRAMEHOOK_EVENT_WRITE) {
 		return f;
 	}
 
@@ -563,14 +565,20 @@ static struct ast_frame *native_rtp_framehook(struct ast_channel *chan,
 		ast_channel_unlock(chan);
 		ast_bridge_lock(bridge);
 		if (!native_data->detached) {
-			if (f->subclass.integer == AST_CONTROL_HOLD) {
+			switch (f->subclass.integer) {
+			case AST_CONTROL_HOLD:
 				native_rtp_bridge_stop(bridge, chan);
-			} else if ((f->subclass.integer == AST_CONTROL_UNHOLD) ||
-				(f->subclass.integer == AST_CONTROL_UPDATE_RTP_PEER)) {
+				break;
+			case AST_CONTROL_UNHOLD:
+			case AST_CONTROL_UPDATE_RTP_PEER:
 				native_rtp_bridge_start(bridge, chan);
+				break;
+			default:
+				break;
 			}
 		}
 		ast_bridge_unlock(bridge);
+		ao2_ref(bridge, -1);
 		ast_channel_lock(chan);
 	}
 
@@ -592,7 +600,8 @@ static int native_rtp_framehook_consume(void *data, enum ast_frame_type type)
  */
 static int native_rtp_bridge_capable(struct ast_channel *chan)
 {
-	return !ast_channel_has_hook_requiring_audio(chan);
+	return !ast_channel_has_hook_requiring_audio(chan)
+			&& ast_channel_state(chan) == AST_STATE_UP;
 }
 
 /*!
@@ -696,6 +705,18 @@ static int native_rtp_bridge_compatible_check(struct ast_bridge *bridge, struct 
 		return 0;
 	}
 
+	if (glue0->audio.instance && glue1->audio.instance) {
+		unsigned int framing_inst0, framing_inst1;
+		framing_inst0 = ast_rtp_codecs_get_framing(ast_rtp_instance_get_codecs(glue0->audio.instance));
+		framing_inst1 = ast_rtp_codecs_get_framing(ast_rtp_instance_get_codecs(glue1->audio.instance));
+		if (framing_inst0 != framing_inst1) {
+			/* ptimes are asymmetric on the two call legs so we can't use the native bridge */
+			ast_debug(1, "Asymmetric ptimes on the two call legs (%u != %u). Cannot native bridge in RTP\n",
+				framing_inst0, framing_inst1);
+			return 0;
+		}
+	}
+
 	read_ptime0 = ast_format_cap_get_format_framing(cap0, ast_channel_rawreadformat(bc0->chan));
 	read_ptime1 = ast_format_cap_get_format_framing(cap1, ast_channel_rawreadformat(bc1->chan));
 	write_ptime0 = ast_format_cap_get_format_framing(cap0, ast_channel_rawwriteformat(bc0->chan));
@@ -746,7 +767,7 @@ static int native_rtp_bridge_compatible(struct ast_bridge *bridge)
 static int native_rtp_bridge_framehook_attach(struct ast_bridge_channel *bridge_channel)
 {
 	struct native_rtp_bridge_channel_data *data = bridge_channel->tech_pvt;
-	static struct ast_framehook_interface hook = {
+	struct ast_framehook_interface hook = {
 		.version = AST_FRAMEHOOK_INTERFACE_VERSION,
 		.event_cb = native_rtp_framehook,
 		.destroy_cb = __ao2_cleanup,
@@ -764,9 +785,10 @@ static int native_rtp_bridge_framehook_attach(struct ast_bridge_channel *bridge_
 	ast_debug(2, "Bridge '%s'.  Attaching hook data %p to '%s'\n",
 		bridge_channel->bridge->uniqueid, data, ast_channel_name(bridge_channel->chan));
 
-	ast_channel_lock(bridge_channel->chan);
 	/* We're giving 1 ref to the framehook and keeping the one from the alloc for ourselves */
 	hook.data = ao2_bump(data->hook_data);
+
+	ast_channel_lock(bridge_channel->chan);
 	data->hook_data->id = ast_framehook_attach(bridge_channel->chan, &hook);
 	ast_channel_unlock(bridge_channel->chan);
 	if (data->hook_data->id < 0) {

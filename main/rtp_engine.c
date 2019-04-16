@@ -728,10 +728,11 @@ void ast_rtp_codecs_payloads_copy(struct ast_rtp_codecs *src, struct ast_rtp_cod
 			ao2_t_cleanup(AST_VECTOR_GET(&dest->payloads, i), "cleaning up vector element about to be replaced");
 		}
 		ast_debug(2, "Copying payload %d (%p) from %p to %p\n", i, type, src, dest);
-		ao2_bump(type);
-		AST_VECTOR_REPLACE(&dest->payloads, i, type);
 
-		if (instance && instance->engine && instance->engine->payload_set) {
+		ao2_bump(type);
+		if (AST_VECTOR_REPLACE(&dest->payloads, i, type)) {
+			ao2_cleanup(type);
+		} else if (instance && instance->engine && instance->engine->payload_set) {
 			ao2_lock(instance);
 			instance->engine->payload_set(instance, i, type->asterisk_format, type->format, type->rtp_code);
 			ao2_unlock(instance);
@@ -767,9 +768,10 @@ void ast_rtp_codecs_payloads_set_m_type(struct ast_rtp_codecs *codecs, struct as
 	if (payload < AST_VECTOR_SIZE(&codecs->payloads)) {
 		ao2_t_cleanup(AST_VECTOR_GET(&codecs->payloads, payload), "cleaning up replaced payload type");
 	}
-	AST_VECTOR_REPLACE(&codecs->payloads, payload, new_type);
 
-	if (instance && instance->engine && instance->engine->payload_set) {
+	if (AST_VECTOR_REPLACE(&codecs->payloads, payload, new_type)) {
+		ao2_ref(new_type, -1);
+	} else if (instance && instance->engine && instance->engine->payload_set) {
 		ao2_lock(instance);
 		instance->engine->payload_set(instance, payload, new_type->asterisk_format, new_type->format, new_type->rtp_code);
 		ao2_unlock(instance);
@@ -837,9 +839,10 @@ int ast_rtp_codecs_payloads_set_rtpmap_type_rate(struct ast_rtp_codecs *codecs, 
 			/* SDP parsing automatically increases the reference count */
 			new_type->format = ast_format_parse_sdp_fmtp(new_type->format, "");
 		}
-		AST_VECTOR_REPLACE(&codecs->payloads, pt, new_type);
 
-		if (instance && instance->engine && instance->engine->payload_set) {
+		if (AST_VECTOR_REPLACE(&codecs->payloads, pt, new_type)) {
+			ao2_ref(new_type, -1);
+		} else if (instance && instance->engine && instance->engine->payload_set) {
 			ao2_lock(instance);
 			instance->engine->payload_set(instance, pt, new_type->asterisk_format, new_type->format, new_type->rtp_code);
 			ao2_unlock(instance);
@@ -882,6 +885,25 @@ void ast_rtp_codecs_payloads_unset(struct ast_rtp_codecs *codecs, struct ast_rtp
 	}
 
 	ast_rwlock_unlock(&codecs->codecs_lock);
+}
+
+enum ast_media_type ast_rtp_codecs_get_stream_type(struct ast_rtp_codecs *codecs)
+{
+	enum ast_media_type stream_type = AST_MEDIA_TYPE_UNKNOWN;
+	int payload;
+	struct ast_rtp_payload_type *type;
+
+	ast_rwlock_rdlock(&codecs->codecs_lock);
+	for (payload = 0; payload < AST_VECTOR_SIZE(&codecs->payloads); ++payload) {
+		type = AST_VECTOR_GET(&codecs->payloads, payload);
+		if (type && type->asterisk_format) {
+			stream_type = ast_format_get_type(type->format);
+			break;
+		}
+	}
+	ast_rwlock_unlock(&codecs->codecs_lock);
+
+	return stream_type;
 }
 
 struct ast_rtp_payload_type *ast_rtp_codecs_get_payload(struct ast_rtp_codecs *codecs, int payload)
@@ -929,7 +951,11 @@ int ast_rtp_codecs_payload_replace_format(struct ast_rtp_codecs *codecs, int pay
 	if (payload < AST_VECTOR_SIZE(&codecs->payloads)) {
 		ao2_cleanup(AST_VECTOR_GET(&codecs->payloads, payload));
 	}
-	AST_VECTOR_REPLACE(&codecs->payloads, payload, type);
+	if (AST_VECTOR_REPLACE(&codecs->payloads, payload, type)) {
+		ao2_ref(type, -1);
+		ast_rwlock_unlock(&codecs->codecs_lock);
+		return -1;
+	}
 	ast_rwlock_unlock(&codecs->codecs_lock);
 
 	return 0;
@@ -2105,35 +2131,35 @@ int ast_rtp_dtls_cfg_parse(struct ast_rtp_dtls_cfg *dtls_cfg, const char *name, 
 			return -1;
 		}
 	} else if (!strcasecmp(name, "dtlscertfile")) {
-		ast_free(dtls_cfg->certfile);
 		if (!ast_strlen_zero(value) && !ast_file_is_readable(value)) {
 			ast_log(LOG_ERROR, "%s file %s does not exist or is not readable\n", name, value);
 			return -1;
 		}
+		ast_free(dtls_cfg->certfile);
 		dtls_cfg->certfile = ast_strdup(value);
 	} else if (!strcasecmp(name, "dtlsprivatekey")) {
-		ast_free(dtls_cfg->pvtfile);
 		if (!ast_strlen_zero(value) && !ast_file_is_readable(value)) {
 			ast_log(LOG_ERROR, "%s file %s does not exist or is not readable\n", name, value);
 			return -1;
 		}
+		ast_free(dtls_cfg->pvtfile);
 		dtls_cfg->pvtfile = ast_strdup(value);
 	} else if (!strcasecmp(name, "dtlscipher")) {
 		ast_free(dtls_cfg->cipher);
 		dtls_cfg->cipher = ast_strdup(value);
 	} else if (!strcasecmp(name, "dtlscafile")) {
-		ast_free(dtls_cfg->cafile);
 		if (!ast_strlen_zero(value) && !ast_file_is_readable(value)) {
 			ast_log(LOG_ERROR, "%s file %s does not exist or is not readable\n", name, value);
 			return -1;
 		}
+		ast_free(dtls_cfg->cafile);
 		dtls_cfg->cafile = ast_strdup(value);
 	} else if (!strcasecmp(name, "dtlscapath") || !strcasecmp(name, "dtlscadir")) {
-		ast_free(dtls_cfg->capath);
 		if (!ast_strlen_zero(value) && !ast_file_is_readable(value)) {
 			ast_log(LOG_ERROR, "%s file %s does not exist or is not readable\n", name, value);
 			return -1;
 		}
+		ast_free(dtls_cfg->capath);
 		dtls_cfg->capath = ast_strdup(value);
 	} else if (!strcasecmp(name, "dtlssetup")) {
 		if (!strcasecmp(value, "active")) {
@@ -2210,7 +2236,7 @@ static void set_next_mime_type(struct ast_format *format, int rtp_code, const ch
 	}
 
 	/* Make sure any previous value in ast_rtp_mime_types is cleaned up */
-	memset(&ast_rtp_mime_types[x], 0, sizeof(struct ast_rtp_mime_type));	
+	memset(&ast_rtp_mime_types[x], 0, sizeof(struct ast_rtp_mime_type));
 	if (format) {
 		ast_rtp_mime_types[x].payload_type.asterisk_format = 1;
 		ast_rtp_mime_types[x].payload_type.format = ao2_bump(format);
@@ -2319,10 +2345,14 @@ static void add_static_payload(int map, struct ast_format *format, int rtp_code)
 
 int ast_rtp_engine_load_format(struct ast_format *format)
 {
+	char *codec_name = ast_strdupa(ast_format_get_codec_name(format));
+
+	codec_name = ast_str_to_upper(codec_name);
+
 	set_next_mime_type(format,
 		0,
 		ast_codec_media_type2str(ast_format_get_type(format)),
-		ast_format_get_codec_name(format),
+		codec_name,
 		ast_format_get_sample_rate(format));
 	add_static_payload(-1, format, 0);
 
@@ -2475,10 +2505,10 @@ static struct ast_json *rtcp_report_to_json(struct stasis_message *msg,
 	const struct stasis_message_sanitizer *sanitize)
 {
 	struct rtcp_message_payload *payload = stasis_message_data(msg);
-	RAII_VAR(struct ast_json *, json_rtcp_report, NULL, ast_json_unref);
-	RAII_VAR(struct ast_json *, json_rtcp_report_blocks, NULL, ast_json_unref);
-	RAII_VAR(struct ast_json *, json_rtcp_sender_info, NULL, ast_json_unref);
-	RAII_VAR(struct ast_json *, json_channel, NULL, ast_json_unref);
+	struct ast_json *json_rtcp_report = NULL;
+	struct ast_json *json_rtcp_report_blocks;
+	struct ast_json *json_rtcp_sender_info = NULL;
+	struct ast_json *json_channel = NULL;
 	int i;
 
 	json_rtcp_report_blocks = ast_json_array_create();
@@ -2489,20 +2519,19 @@ static struct ast_json *rtcp_report_to_json(struct stasis_message *msg,
 	for (i = 0; i < payload->report->reception_report_count && payload->report->report_block[i]; i++) {
 		struct ast_json *json_report_block;
 		char str_lsr[32];
-		snprintf(str_lsr, sizeof(str_lsr), "%u", payload->report->report_block[i]->lsr);
-		json_report_block = ast_json_pack("{s: i, s: i, s: i, s: i, s: i, s: s, s: i}",
-				"source_ssrc", payload->report->report_block[i]->source_ssrc,
-				"fraction_lost", payload->report->report_block[i]->lost_count.fraction,
-				"packets_lost", payload->report->report_block[i]->lost_count.packets,
-				"highest_seq_no", payload->report->report_block[i]->highest_seq_no,
-				"ia_jitter", payload->report->report_block[i]->ia_jitter,
-				"lsr", str_lsr,
-				"dlsr", payload->report->report_block[i]->dlsr);
-		if (!json_report_block) {
-			return NULL;
-		}
 
-		if (ast_json_array_append(json_rtcp_report_blocks, json_report_block)) {
+		snprintf(str_lsr, sizeof(str_lsr), "%u", payload->report->report_block[i]->lsr);
+		json_report_block = ast_json_pack("{s: I, s: i, s: i, s: i, s: i, s: s, s: i}",
+			"source_ssrc", (ast_json_int_t)payload->report->report_block[i]->source_ssrc,
+			"fraction_lost", payload->report->report_block[i]->lost_count.fraction,
+			"packets_lost", payload->report->report_block[i]->lost_count.packets,
+			"highest_seq_no", payload->report->report_block[i]->highest_seq_no,
+			"ia_jitter", payload->report->report_block[i]->ia_jitter,
+			"lsr", str_lsr,
+			"dlsr", payload->report->report_block[i]->dlsr);
+		if (!json_report_block
+			|| ast_json_array_append(json_rtcp_report_blocks, json_report_block)) {
+			ast_json_unref(json_rtcp_report_blocks);
 			return NULL;
 		}
 	}
@@ -2510,25 +2539,27 @@ static struct ast_json *rtcp_report_to_json(struct stasis_message *msg,
 	if (payload->report->type == AST_RTP_RTCP_SR) {
 		char sec[32];
 		char usec[32];
+
 		snprintf(sec, sizeof(sec), "%lu", (unsigned long)payload->report->sender_information.ntp_timestamp.tv_sec);
 		snprintf(usec, sizeof(usec), "%lu", (unsigned long)payload->report->sender_information.ntp_timestamp.tv_usec);
 		json_rtcp_sender_info = ast_json_pack("{s: s, s: s, s: i, s: i, s: i}",
-				"ntp_timestamp_sec", sec,
-				"ntp_timestamp_usec", usec,
-				"rtp_timestamp", payload->report->sender_information.rtp_timestamp,
-				"packets", payload->report->sender_information.packet_count,
-				"octets", payload->report->sender_information.octet_count);
+			"ntp_timestamp_sec", sec,
+			"ntp_timestamp_usec", usec,
+			"rtp_timestamp", payload->report->sender_information.rtp_timestamp,
+			"packets", payload->report->sender_information.packet_count,
+			"octets", payload->report->sender_information.octet_count);
 		if (!json_rtcp_sender_info) {
+			ast_json_unref(json_rtcp_report_blocks);
 			return NULL;
 		}
 	}
 
-	json_rtcp_report = ast_json_pack("{s: i, s: i, s: i, s: o, s: o}",
-			"ssrc", payload->report->ssrc,
-			"type", payload->report->type,
-			"report_count", payload->report->reception_report_count,
-			"sender_information", json_rtcp_sender_info ? ast_json_ref(json_rtcp_sender_info) : ast_json_ref(ast_json_null()),
-			"report_blocks", ast_json_ref(json_rtcp_report_blocks));
+	json_rtcp_report = ast_json_pack("{s: I, s: i, s: i, s: o, s: o}",
+		"ssrc", (ast_json_int_t)payload->report->ssrc,
+		"type", payload->report->type,
+		"report_count", payload->report->reception_report_count,
+		"sender_information", json_rtcp_sender_info ?: ast_json_null(),
+		"report_blocks", json_rtcp_report_blocks);
 	if (!json_rtcp_report) {
 		return NULL;
 	}
@@ -2536,14 +2567,15 @@ static struct ast_json *rtcp_report_to_json(struct stasis_message *msg,
 	if (payload->snapshot) {
 		json_channel = ast_channel_snapshot_to_json(payload->snapshot, sanitize);
 		if (!json_channel) {
+			ast_json_unref(json_rtcp_report);
 			return NULL;
 		}
 	}
 
 	return ast_json_pack("{s: o, s: o, s: o}",
-		"channel", payload->snapshot ? ast_json_ref(json_channel) : ast_json_ref(ast_json_null()),
-		"rtcp_report", ast_json_ref(json_rtcp_report),
-		"blob", ast_json_deep_copy(payload->blob));
+		"channel", payload->snapshot ? json_channel : ast_json_null(),
+		"rtcp_report", json_rtcp_report,
+		"blob", ast_json_deep_copy(payload->blob) ?: ast_json_null());
 }
 
 static void rtp_rtcp_report_dtor(void *obj)
@@ -2649,7 +2681,7 @@ int ast_rtp_engine_init(void)
 	ast_rwlock_init(&mime_types_lock);
 	ast_rwlock_init(&static_RTP_PT_lock);
 
-	rtp_topic = stasis_topic_create("rtp_topic");
+	rtp_topic = stasis_topic_create("rtp:all");
 	if (!rtp_topic) {
 		return -1;
 	}
@@ -2695,9 +2727,10 @@ int ast_rtp_engine_init(void)
 	set_next_mime_type(ast_format_siren7, 0, "audio", "G7221", 16000);
 	set_next_mime_type(ast_format_siren14, 0, "audio", "G7221", 32000);
 	set_next_mime_type(ast_format_g719, 0, "audio", "G719", 48000);
-	/* Opus and VP8 */
+	/* Opus, VP8, and VP9 */
 	set_next_mime_type(ast_format_opus, 0,  "audio", "opus", 48000);
 	set_next_mime_type(ast_format_vp8, 0,  "video", "VP8", 90000);
+	set_next_mime_type(ast_format_vp9, 0, "video", "VP9", 90000);
 
 	/* Define the static rtp payload mappings */
 	add_static_payload(0, ast_format_ulaw, 0);
@@ -2722,7 +2755,7 @@ int ast_rtp_engine_init(void)
 	add_static_payload(31, ast_format_h261, 0);
 	add_static_payload(34, ast_format_h263, 0);
 	add_static_payload(97, ast_format_ilbc, 0);
-	add_static_payload(98, ast_format_h263p, 0);
+
 	add_static_payload(99, ast_format_h264, 0);
 	add_static_payload(101, NULL, AST_RTP_DTMF);
 	add_static_payload(102, ast_format_siren7, 0);
@@ -2730,6 +2763,8 @@ int ast_rtp_engine_init(void)
 	add_static_payload(104, ast_format_mp4, 0);
 	add_static_payload(105, ast_format_t140_red, 0);   /* Real time text chat (with redundancy encoding) */
 	add_static_payload(106, ast_format_t140, 0);     /* Real time text chat */
+	add_static_payload(108, ast_format_vp9, 0);
+
 	add_static_payload(110, ast_format_speex, 0);
 	add_static_payload(111, ast_format_g726, 0);
 	add_static_payload(112, ast_format_g726_aal2, 0);

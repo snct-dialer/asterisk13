@@ -445,7 +445,7 @@ uint16_t _ast_sockaddr_port(const struct ast_sockaddr *addr, const char *file, i
 		&& addr->ss.ss_family == AF_INET6) {
 		return ntohs(((struct sockaddr_in6 *)&addr->ss)->sin6_port);
 	}
-	if (option_debug >= 1) {
+	if (DEBUG_ATLEAST(1)) {
 		ast_log(__LOG_DEBUG, file, line, func, "Not an IPv4 nor IPv6 address, cannot get port.\n");
 	}
 	return 0;
@@ -463,7 +463,7 @@ void _ast_sockaddr_set_port(struct ast_sockaddr *addr, uint16_t port, const char
 	} else if (addr->len == sizeof(struct sockaddr_in6)
 		&& addr->ss.ss_family == AF_INET6) {
 		((struct sockaddr_in6 *)&addr->ss)->sin6_port = htons(port);
-	} else if (option_debug >= 1) {
+	} else if (DEBUG_ATLEAST(1)) {
 		ast_log(__LOG_DEBUG, file, line, func,
 			"Not an IPv4 nor IPv6 address, cannot set port.\n");
 	}
@@ -477,8 +477,12 @@ uint32_t ast_sockaddr_ipv4(const struct ast_sockaddr *addr)
 
 int ast_sockaddr_is_ipv4(const struct ast_sockaddr *addr)
 {
-	return addr->ss.ss_family == AF_INET &&
-	    addr->len == sizeof(struct sockaddr_in);
+	/*
+	 * Test addr->len first to be tolerant of an ast_sockaddr_setnull()
+	 * addr.  In that case addr->len might be the only value initialized.
+	 */
+	return addr->len == sizeof(struct sockaddr_in)
+		&& addr->ss.ss_family == AF_INET;
 }
 
 int ast_sockaddr_is_ipv4_mapped(const struct ast_sockaddr *addr)
@@ -500,8 +504,12 @@ int ast_sockaddr_is_ipv6_link_local(const struct ast_sockaddr *addr)
 
 int ast_sockaddr_is_ipv6(const struct ast_sockaddr *addr)
 {
-	return addr->ss.ss_family == AF_INET6 &&
-	    addr->len == sizeof(struct sockaddr_in6);
+	/*
+	 * Test addr->len first to be tolerant of an ast_sockaddr_setnull()
+	 * addr.  In that case addr->len might be the only value initialized.
+	 */
+	return addr->len == sizeof(struct sockaddr_in6)
+		&& addr->ss.ss_family == AF_INET6;
 }
 
 int ast_sockaddr_is_any(const struct ast_sockaddr *addr)
@@ -601,7 +609,7 @@ int ast_set_qos(int sockfd, int tos, int cos, const char *desc)
 	/* If the sock address is IPv6, the TCLASS field must be set. */
 	set_tclass = !ast_getsockname(sockfd, &addr) && ast_sockaddr_is_ipv6(&addr) ? 1 : 0;
 
-	/* If the the sock address is IPv4 or (IPv6 set to any address [::]) set TOS bits */
+	/* If the sock address is IPv4 or (IPv6 set to any address [::]) set TOS bits */
 	set_tos = (!set_tclass || (set_tclass && ast_sockaddr_is_any(&addr))) ? 1 : 0;
 
 	if (set_tos) {
@@ -651,7 +659,7 @@ int _ast_sockaddr_to_sin(const struct ast_sockaddr *addr,
 		return 0;
 	}
 
-	if (addr->ss.ss_family != AF_INET && option_debug >= 1) {
+	if (addr->ss.ss_family != AF_INET && DEBUG_ATLEAST(1)) {
 		ast_log(__LOG_DEBUG, file, line, func, "Address family is not AF_INET\n");
 	}
 
@@ -664,7 +672,7 @@ void _ast_sockaddr_from_sin(struct ast_sockaddr *addr, const struct sockaddr_in 
 {
 	memcpy(&addr->ss, sin, sizeof(*sin));
 
-	if (addr->ss.ss_family != AF_INET && option_debug >= 1) {
+	if (addr->ss.ss_family != AF_INET && DEBUG_ATLEAST(1)) {
 		ast_log(__LOG_DEBUG, file, line, func, "Address family is not AF_INET\n");
 	}
 

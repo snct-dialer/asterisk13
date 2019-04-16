@@ -9,7 +9,7 @@ Index: trunk/build_tools/cflags.xml
 ===================================================================
 --- trunk.orig/build_tools/cflags.xml
 +++ trunk/build_tools/cflags.xml
-@@ -130,7 +130,7 @@
+@@ -128,7 +128,7 @@
  		</member>
  		<member name="BUILD_NATIVE" displayname="Allow compiler to generate code optimized for the CPU on which the build is performed.">
  			<support_level>core</support_level>

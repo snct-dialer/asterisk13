@@ -169,6 +169,7 @@ struct ast_channel {
 	unsigned long insmpl;				/*!< Track the read/written samples for monitor use */
 	unsigned long outsmpl;				/*!< Track the read/written samples for monitor use */
 
+	int blocker_tid;					/*!< If anyone is blocking, this is their thread id */
 	int fds[AST_MAX_FDS];				/*!< File descriptors for channel -- Drivers will poll on
 							 *   these file descriptors, so at least one must be non -1.
 							 *   See \arg \ref AstFileDesc */
@@ -1331,6 +1332,15 @@ void ast_channel_blocker_set(struct ast_channel *chan, pthread_t value)
 	chan->blocker = value;
 }
 
+int ast_channel_blocker_tid(const struct ast_channel *chan)
+{
+	return chan->blocker_tid;
+}
+void ast_channel_blocker_tid_set(struct ast_channel *chan, int value)
+{
+	chan->blocker_tid = value;
+}
+
 ast_timing_func_t ast_channel_timingfunc(const struct ast_channel *chan)
 {
 	return chan->timingfunc;
@@ -1452,7 +1462,9 @@ struct ast_channel *__ast_channel_internal_alloc(void (*destructor)(void *obj), 
 		return ast_channel_unref(tmp);
 	}
 
-	if (!(tmp->dialed_causes = ao2_container_alloc(DIALED_CAUSES_BUCKETS, pvt_cause_hash_fn, pvt_cause_cmp_fn))) {
+	tmp->dialed_causes = ao2_container_alloc_hash(AO2_ALLOC_OPT_LOCK_MUTEX, 0,
+		DIALED_CAUSES_BUCKETS, pvt_cause_hash_fn, NULL, pvt_cause_cmp_fn);
+	if (!tmp->dialed_causes) {
 		return ast_channel_unref(tmp);
 	}
 
@@ -1534,6 +1546,18 @@ void ast_channel_internal_swap_topics(struct ast_channel *a, struct ast_channel 
 	b->topics = temp;
 }
 
+void ast_channel_internal_swap_endpoint_forward_and_endpoint_cache_forward(struct ast_channel *a, struct ast_channel *b)
+{
+	struct stasis_forward *temp;
+	temp = a->endpoint_forward;
+	a->endpoint_forward = b->endpoint_forward;
+	b->endpoint_forward = temp;
+
+	temp = a->endpoint_cache_forward;
+	a->endpoint_cache_forward = b->endpoint_cache_forward;
+	b->endpoint_cache_forward = temp;
+}
+
 void ast_channel_internal_set_fake_ids(struct ast_channel *chan, const char *uniqueid, const char *linkedid)
 {
 	ast_copy_string(chan->uniqueid.unique_id, uniqueid, sizeof(chan->uniqueid.unique_id));
@@ -1610,15 +1634,24 @@ int ast_channel_forward_endpoint(struct ast_channel *chan,
 
 int ast_channel_internal_setup_topics(struct ast_channel *chan)
 {
-	const char *topic_name = chan->uniqueid.unique_id;
+	char *topic_name;
+	int ret;
 	ast_assert(chan->topics == NULL);
 
-	if (ast_strlen_zero(topic_name)) {
-		topic_name = "<dummy-channel>";
+	if (ast_strlen_zero(chan->uniqueid.unique_id)) {
+		static int dummy_id;
+		ret = ast_asprintf(&topic_name, "channel:dummy-%d", ast_atomic_fetchadd_int(&dummy_id, +1));
+	} else {
+		ret = ast_asprintf(&topic_name, "channel:%s", chan->uniqueid.unique_id);
+	}
+
+	if (ret < 0) {
+		return -1;
 	}
 
 	chan->topics = stasis_cp_single_create(
 		ast_channel_cache_all(), topic_name);
+	ast_free(topic_name);
 	if (!chan->topics) {
 		return -1;
 	}

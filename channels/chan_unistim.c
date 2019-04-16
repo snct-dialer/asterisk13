@@ -43,7 +43,7 @@ ASTERISK_FILE_VERSION(__FILE__, "$Revision$")
 #include <sys/stat.h>
 #include <signal.h>
 
-#if defined(__CYGWIN__)
+#if defined(__CYGWIN__) || defined(__NetBSD__)
 /*
  * cygwin headers are partly inconsistent. struct iovec is defined in sys/uio.h
  * which is not included by default by sys/socket.h - in_pktinfo is defined in
@@ -55,7 +55,7 @@ ASTERISK_FILE_VERSION(__FILE__, "$Revision$")
 #ifdef HAVE_PKTINFO
 #undef HAVE_PKTINFO
 #endif
-#endif /* __CYGWIN__ */
+#endif /* __CYGWIN__ || __NetBSD__ */
 
 #include "asterisk/paths.h"	/* ast_config_AST_LOG_DIR used in (too ?) many places */
 #include "asterisk/network.h"
@@ -116,7 +116,6 @@ ASTERISK_FILE_VERSION(__FILE__, "$Revision$")
 #define SUB_REAL		0
 #define SUB_RING                1
 #define SUB_THREEWAY            2
-#define SUB_ONHOLD              3
 
 struct ast_format_cap *global_cap;
 
@@ -353,13 +352,14 @@ struct wsabuf {
 
 struct unistim_subchannel {
 	ast_mutex_t lock;
-	unsigned int subtype;		/*! SUB_REAL, SUB_RING, SUB_THREEWAY or SUB_ONHOLD */
+	unsigned int subtype;		/*! SUB_REAL, SUB_RING or SUB_THREEWAY */
 	struct ast_channel *owner;	/*! Asterisk channel used by the subchannel */
 	struct unistim_line *parent;	/*! Unistim line */
 	struct ast_rtp_instance *rtp;	/*! RTP handle */
 	int softkey;			/*! Softkey assigned */
 	pthread_t ss_thread;		/*! unistim_ss thread handle */
 	int alreadygone;
+	int holding;			/*! this subchannel holds someone */
 	signed char ringvolume;
 	signed char ringstyle;
 	int moh;					/*!< Music on hold in progress */
@@ -372,7 +372,7 @@ struct unistim_subchannel {
 struct unistim_line {
 	ast_mutex_t lock;
 	char name[80]; /*! Like 200 */
-	char fullname[80]; /*! Like USTM/200\@black */
+	char fullname[101]; /*! Like USTM/200\@black */
 	char exten[AST_MAX_EXTENSION]; /*! Extension where to start */
 	char cid_num[AST_MAX_EXTENSION]; /*! CallerID Number */
 	char mailbox[AST_MAX_EXTENSION]; /*! Mailbox for MWI */
@@ -815,7 +815,9 @@ static const char *ustmtext(const char *str, struct unistimsession *pte)
 		char tmp[1024], *p, *p_orig = NULL, *p_trans = NULL;
 		FILE *f;
 
-		if (!(lang->trans = ao2_container_alloc(8, lang_hash_fn, lang_cmp_fn))) {
+		lang->trans = ao2_container_alloc_hash(AO2_ALLOC_OPT_LOCK_MUTEX, 0, 8,
+			lang_hash_fn, NULL, lang_cmp_fn);
+		if (!lang->trans) {
 			ast_log(LOG_ERROR, "Unable to allocate container for translation!\n");
 			return str;
 		}
@@ -2017,8 +2019,6 @@ static const char *subtype_tostr(const int type)
 	switch (type) {
 	case SUB_REAL:
 		return "REAL";
-	case SUB_ONHOLD:
-		return "ONHOLD";
 	case SUB_RING:
 		return "RINGING";
 	case SUB_THREEWAY:
@@ -2498,6 +2498,24 @@ static struct unistim_subchannel* get_sub(struct unistim_device *device, int typ
 	return sub;
 }
 
+static struct unistim_subchannel* get_sub_holding(struct unistim_device *device, int type, int holding)
+{
+	struct unistim_subchannel *sub = NULL;
+
+	AST_LIST_LOCK(&device->subs);
+	AST_LIST_TRAVERSE(&device->subs, sub, list) {
+		if (!sub) {
+			continue;
+		}
+		if (sub->subtype == type && sub->holding == holding) {
+			break;
+		}
+	}
+	AST_LIST_UNLOCK(&device->subs);
+
+	return sub;
+}
+
 static void sub_start_silence(struct unistimsession *pte, struct unistim_subchannel *sub)
 {
 	/* Silence our channel */
@@ -2535,13 +2553,12 @@ static void sub_hold(struct unistimsession *pte, struct unistim_subchannel *sub)
 		return;
 	}
 	sub->moh = 1;
-	sub->subtype = SUB_ONHOLD;
+	sub->holding = 1;
 	send_favorite_short(sub->softkey, FAV_ICON_ONHOLD_BLACK + FAV_BLINK_SLOW, pte);
 	send_select_output(pte, pte->device->output, pte->device->volume, MUTE_ON);
 	send_stop_timer(pte);
 	if (sub->owner) {
 		ast_queue_hold(sub->owner, NULL);
-		send_end_call(pte);
 	}
 	return;
 }
@@ -2556,7 +2573,7 @@ static void sub_unhold(struct unistimsession *pte, struct unistim_subchannel *su
 	}
 
 	sub->moh = 0;
-	sub->subtype = SUB_REAL;
+	sub->holding = 0;
 	send_favorite_short(sub->softkey, FAV_ICON_OFFHOOK_BLACK, pte);
 	send_select_output(pte, pte->device->output, pte->device->volume, MUTE_OFF);
 	send_start_timer(pte);
@@ -3356,12 +3373,12 @@ static int unistim_do_senddigit(struct unistimsession *pte, char digit)
 static void handle_key_fav(struct unistimsession *pte, char keycode)
 {
 	int keynum = keycode - KEY_FAV0;
-	struct unistim_subchannel *sub;
-
-	sub = get_sub(pte->device, SUB_REAL);
+	struct unistim_subchannel *sub, *sub_key = NULL;
+	sub = get_sub_holding(pte->device, SUB_REAL, 0);
 
 	/* Make an action on selected favorite key */
 	if (!pte->device->ssub[keynum]) { /* Key have no assigned call */
+		sub = get_sub_holding(pte->device, SUB_REAL, 0);
 		send_favorite_selected(FAV_LINE_ICON, pte);
 		if (is_key_line(pte->device, keynum)) {
 			if (unistimdebug) {
@@ -3386,21 +3403,24 @@ static void handle_key_fav(struct unistimsession *pte, char keycode)
 			key_favorite(pte, keycode);
 		}
 	} else {
-		sub = pte->device->ssub[keynum];
+		sub_key = pte->device->ssub[keynum];
 		/* Favicon have assigned sub, activate it and put current on hold */
-		if (sub->subtype == SUB_REAL) {
-			sub_hold(pte, sub);
+		if (sub_key->subtype == SUB_REAL && !sub_key->holding) {
+			sub_hold(pte, sub_key);
 			show_main_page(pte);
-		} else if (sub->subtype == SUB_RING) {
-			sub->softkey = keynum;
-			handle_call_incoming(pte);
-		} else if (sub->subtype == SUB_ONHOLD) {
+		} else if (sub_key->subtype == SUB_REAL && sub_key->holding) {
+			/* We are going to unhold line (we should put active line on hold, of any) */
 			if (pte->state == STATE_DIALPAGE){
 				send_tone(pte, 0, 0);
 			}
-			send_callerid_screen(pte, sub);
-			sub_unhold(pte, sub);
+			sub_hold(pte, sub);
+			send_callerid_screen(pte, sub_key);
+			sub_unhold(pte, sub_key);
 			pte->state = STATE_CALL;
+		} else if (sub_key->subtype == SUB_RING) {
+			sub_hold(pte, sub);
+			sub_key->softkey = keynum;
+			handle_call_incoming(pte);
 		}
 	}
 }
@@ -3470,8 +3490,13 @@ static void key_call(struct unistimsession *pte, char keycode)
 	case KEY_ONHOLD:
 		if (!sub) {
 			if(pte->device->ssub[pte->device->selected]) {
-				sub_hold(pte, pte->device->ssub[pte->device->selected]);
+				sub = pte->device->ssub[pte->device->selected];
+			} else {
+				break;
 			}
+		}
+		if (sub->holding) {
+			sub_unhold(pte, sub);
 		} else {
 			sub_hold(pte, sub);
 		}
@@ -3699,7 +3724,7 @@ static void key_select_option(struct unistimsession *pte, char keycode)
 #define SELECTCODEC_MSG "Codec number : .."
 static void handle_select_codec(struct unistimsession *pte)
 {
-	char buf[30], buf2[5];
+	char buf[30], buf2[6];
 
 	pte->state = STATE_SELECTCODEC;
 	ast_copy_string(buf, ustmtext("Using codec", pte), sizeof(buf));
@@ -4485,7 +4510,7 @@ static void process_request(int size, unsigned char *buf, struct unistimsession 
 	}
 	if (!memcmp(buf + SIZE_HEADER, packet_recv_expansion_pressed_key, sizeof(packet_recv_expansion_pressed_key))) {
 		char keycode = buf[13];
-		
+
 		if (unistimdebug) {
 			ast_verb(0, "Expansion key pressed: keycode = 0x%02hhx - current state: %s\n", (unsigned char)keycode,
 						ptestate_tostr(pte->state));
@@ -4965,7 +4990,7 @@ static int unistim_hangup(struct ast_channel *ast)
 				continue;
 			}
 			if (d->ssub[i] != sub) {
-				if (d->ssub[i] != NULL) { /* Found other subchannel active other then hangup'ed one */
+				if (d->ssub[i] != NULL) { /* Found other subchannel active other than hangup'ed one */
 					end_call = 0;
 				}
 				continue;
@@ -5429,7 +5454,8 @@ static struct unistim_subchannel *find_subchannel_by_name(const char *dest)
 					}
 					if (sub->owner) {
 						/* Allocate additional channel if asterisk channel already here */
-						sub = unistim_alloc_sub(d, SUB_ONHOLD);
+						sub = unistim_alloc_sub(d, SUB_REAL);
+						sub->holding = 1;
 					}
 					sub->ringvolume = -1;
 					sub->ringstyle = -1;
@@ -6437,7 +6463,7 @@ static struct unistim_device *build_device(const char *cat, const struct ast_var
 		}
 		ast_mutex_init(&d->lock);
 		ast_copy_string(d->name, cat, sizeof(d->name));
-		
+
 		ast_copy_string(d->context, DEFAULTCONTEXT, sizeof(d->context));
 		d->contrast = -1;
 		d->output = OUTPUT_HANDSET;
@@ -7025,7 +7051,7 @@ static int unistim_set_rtp_peer(struct ast_channel *chan, struct ast_rtp_instanc
 	if (!rtp) {
 		return 0;
 	}
-	
+
 	sub = (struct unistim_subchannel *) ast_channel_tech_pvt(chan);
 	if (!sub) {
 		ast_log(LOG_ERROR, "No Private Structure, this is bad\n");
@@ -7038,9 +7064,9 @@ static int unistim_set_rtp_peer(struct ast_channel *chan, struct ast_rtp_instanc
 		ast_rtp_instance_get_local_address(rtp, &tmp);
 		ast_sockaddr_to_sin(&tmp, &us);
 	}
-	
+
 	/* TODO: Set rtp on phone in case of direct rtp (not implemented) */
-	
+
 	return 0;
 }
 

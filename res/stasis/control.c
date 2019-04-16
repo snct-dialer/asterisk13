@@ -74,9 +74,19 @@ struct stasis_app_control {
 	 */
 	struct ast_silence_generator *silgen;
 	/*!
-	 * The app for which this control was created
+	 * The app for which this control is currently controlling.
+	 * This can change through the use of the /channels/{channelId}/move
+	 * command.
 	 */
 	struct stasis_app *app;
+	/*!
+	 * The name of the next Stasis application to move to.
+	 */
+	char *next_app;
+	/*!
+	 * The list of arguments to pass to StasisStart when moving to another app.
+	 */
+	AST_VECTOR(, char *) next_app_args;
 	/*!
 	 * When set, /c app_stasis should exit and continue in the dialplan.
 	 */
@@ -91,6 +101,8 @@ static void control_dtor(void *obj)
 
 	ast_channel_cleanup(control->channel);
 	ao2_cleanup(control->app);
+
+	control_move_cleanup(control);
 
 	ast_cond_destroy(&control->wait_cond);
 	AST_LIST_HEAD_DESTROY(&control->add_rules);
@@ -130,6 +142,9 @@ struct stasis_app_control *control_create(struct ast_channel *channel, struct st
 		return NULL;
 	}
 
+	control->next_app = NULL;
+	AST_VECTOR_INIT(&control->next_app_args, 0);
+
 	return control;
 }
 
@@ -137,8 +152,9 @@ static void app_control_register_rule(
 	const struct stasis_app_control *control,
 	struct app_control_rules *list, struct stasis_app_control_rule *obj)
 {
-	SCOPED_AO2LOCK(lock, control->command_queue);
+	ao2_lock(control->command_queue);
 	AST_LIST_INSERT_TAIL(list, obj, next);
+	ao2_unlock(control->command_queue);
 }
 
 static void app_control_unregister_rule(
@@ -146,7 +162,8 @@ static void app_control_unregister_rule(
 	struct app_control_rules *list, struct stasis_app_control_rule *obj)
 {
 	struct stasis_app_control_rule *rule;
-	SCOPED_AO2LOCK(lock, control->command_queue);
+
+	ao2_lock(control->command_queue);
 	AST_RWLIST_TRAVERSE_SAFE_BEGIN(list, rule, next) {
 		if (rule == obj) {
 			AST_RWLIST_REMOVE_CURRENT(next);
@@ -154,6 +171,7 @@ static void app_control_unregister_rule(
 		}
 	}
 	AST_RWLIST_TRAVERSE_SAFE_END;
+	ao2_unlock(control->command_queue);
 }
 
 /*!
@@ -460,6 +478,78 @@ int stasis_app_control_continue(struct stasis_app_control *control, const char *
 	return 0;
 }
 
+struct stasis_app_control_move_data {
+	char *app_name;
+	char *app_args;
+};
+
+static int app_control_move(struct stasis_app_control *control,
+	struct ast_channel *chan, void *data)
+{
+	struct stasis_app_control_move_data *move_data = data;
+
+	control->next_app = ast_strdup(move_data->app_name);
+	if (!control->next_app) {
+		ast_log(LOG_ERROR, "Allocation failed for next app\n");
+		return -1;
+	}
+
+	if (move_data->app_args) {
+		char *token;
+
+		while ((token = strtok_r(move_data->app_args, ",", &move_data->app_args))) {
+			int res;
+			char *arg;
+
+			if (!(arg = ast_strdup(token))) {
+				ast_log(LOG_ERROR, "Allocation failed for next app arg\n");
+				control_move_cleanup(control);
+				return -1;
+			}
+
+			res = AST_VECTOR_APPEND(&control->next_app_args, arg);
+			if (res) {
+				ast_log(LOG_ERROR, "Failed to append arg to next app args\n");
+				ast_free(arg);
+				control_move_cleanup(control);
+				return -1;
+			}
+		}
+	}
+
+	return 0;
+}
+
+int stasis_app_control_move(struct stasis_app_control *control, const char *app_name, const char *app_args)
+{
+	struct stasis_app_control_move_data *move_data;
+	size_t size;
+
+	size = sizeof(*move_data) + strlen(app_name) + 1;
+	if (app_args) {
+		/* Application arguments are optional */
+		size += strlen(app_args) + 1;
+	}
+
+	if (!(move_data = ast_calloc(1, size))) {
+		return -1;
+	}
+
+	move_data->app_name = (char *)move_data + sizeof(*move_data);
+	strcpy(move_data->app_name, app_name); /* Safe */
+
+	if (app_args) {
+		move_data->app_args = move_data->app_name + strlen(app_name) + 1;
+		strcpy(move_data->app_args, app_args); /* Safe */
+	} else {
+		move_data->app_args = NULL;
+	}
+
+	stasis_app_send_command_async(control, app_control_move, move_data, ast_free_ptr);
+
+	return 0;
+}
+
 static int app_control_redirect(struct stasis_app_control *control,
 	struct ast_channel *chan, void *data)
 {
@@ -500,6 +590,32 @@ struct stasis_app_control_dtmf_data {
 	char dtmf[];
 };
 
+static void dtmf_in_bridge(struct ast_channel *chan, struct stasis_app_control_dtmf_data *dtmf_data)
+{
+	if (dtmf_data->before) {
+		usleep(dtmf_data->before * 1000);
+	}
+
+	ast_dtmf_stream_external(chan, dtmf_data->dtmf, dtmf_data->between, dtmf_data->duration);
+
+	if (dtmf_data->after) {
+		usleep(dtmf_data->after * 1000);
+	}
+}
+
+static void dtmf_no_bridge(struct ast_channel *chan, struct stasis_app_control_dtmf_data *dtmf_data)
+{
+	if (dtmf_data->before) {
+		ast_safe_sleep(chan, dtmf_data->before);
+	}
+
+	ast_dtmf_stream(chan, NULL, dtmf_data->dtmf, dtmf_data->between, dtmf_data->duration);
+
+	if (dtmf_data->after) {
+		ast_safe_sleep(chan, dtmf_data->after);
+	}
+}
+
 static int app_control_dtmf(struct stasis_app_control *control,
 	struct ast_channel *chan, void *data)
 {
@@ -509,14 +625,10 @@ static int app_control_dtmf(struct stasis_app_control *control,
 		ast_indicate(chan, AST_CONTROL_PROGRESS);
 	}
 
-	if (dtmf_data->before) {
-		ast_safe_sleep(chan, dtmf_data->before);
-	}
-
-	ast_dtmf_stream(chan, NULL, dtmf_data->dtmf, dtmf_data->between, dtmf_data->duration);
-
-	if (dtmf_data->after) {
-		ast_safe_sleep(chan, dtmf_data->after);
+	if (stasis_app_get_bridge(control)) {
+		dtmf_in_bridge(chan, dtmf_data);
+	} else {
+		dtmf_no_bridge(chan, dtmf_data);
 	}
 
 	return 0;
@@ -580,9 +692,10 @@ static int app_control_mute(struct stasis_app_control *control,
 	struct ast_channel *chan, void *data)
 {
 	struct stasis_app_control_mute_data *mute_data = data;
-	SCOPED_CHANNELLOCK(lockvar, chan);
 
+	ast_channel_lock(chan);
 	ast_channel_suppress(control->channel, mute_data->direction, mute_data->frametype);
+	ast_channel_unlock(chan);
 
 	return 0;
 }
@@ -607,9 +720,10 @@ static int app_control_unmute(struct stasis_app_control *control,
 	struct ast_channel *chan, void *data)
 {
 	struct stasis_app_control_mute_data *mute_data = data;
-	SCOPED_CHANNELLOCK(lockvar, chan);
 
+	ast_channel_lock(chan);
 	ast_channel_unsuppress(control->channel, mute_data->direction, mute_data->frametype);
+	ast_channel_unlock(chan);
 
 	return 0;
 }
@@ -818,7 +932,7 @@ void stasis_app_control_silence_stop(struct stasis_app_control *control)
 struct ast_channel_snapshot *stasis_app_control_get_snapshot(
 	const struct stasis_app_control *control)
 {
-	RAII_VAR(struct stasis_message *, msg, NULL, ao2_cleanup);
+	struct stasis_message *msg;
 	struct ast_channel_snapshot *snapshot;
 
 	msg = stasis_cache_get(ast_channel_cache(), ast_channel_snapshot_type(),
@@ -831,6 +945,8 @@ struct ast_channel_snapshot *stasis_app_control_get_snapshot(
 	ast_assert(snapshot != NULL);
 
 	ao2_ref(snapshot, +1);
+	ao2_ref(msg, -1);
+
 	return snapshot;
 }
 
@@ -839,7 +955,8 @@ static int app_send_command_on_condition(struct stasis_app_control *control,
 					 command_data_destructor_fn data_destructor,
 					 app_command_can_exec_cb can_exec_fn)
 {
-	RAII_VAR(struct stasis_app_command *, command, NULL, ao2_cleanup);
+	int ret;
+	struct stasis_app_command *command;
 
 	if (control == NULL || control->is_done) {
 		/* If exec_command_on_condition fails, it calls the data_destructor.
@@ -859,7 +976,10 @@ static int app_send_command_on_condition(struct stasis_app_control *control,
 		return -1;
 	}
 
-	return command_join(command);
+	ret = command_join(command);
+	ao2_ref(command, -1);
+
+	return ret;
 }
 
 int stasis_app_send_command(struct stasis_app_control *control,
@@ -872,7 +992,7 @@ int stasis_app_send_command_async(struct stasis_app_control *control,
 	stasis_app_command_cb command_fn, void *data,
 	command_data_destructor_fn data_destructor)
 {
-	RAII_VAR(struct stasis_app_command *, command, NULL, ao2_cleanup);
+	struct stasis_app_command *command;
 
 	if (control == NULL || control->is_done) {
 		/* If exec_command fails, it calls the data_destructor. In order to
@@ -890,33 +1010,39 @@ int stasis_app_send_command_async(struct stasis_app_control *control,
 	if (!command) {
 		return -1;
 	}
+	ao2_ref(command, -1);
 
 	return 0;
 }
 
 struct ast_bridge *stasis_app_get_bridge(struct stasis_app_control *control)
 {
+	struct ast_bridge *ret;
+
 	if (!control) {
 		return NULL;
-	} else {
-		SCOPED_AO2LOCK(lock, control);
-		return control->bridge;
 	}
+
+	ao2_lock(control);
+	ret = control->bridge;
+	ao2_unlock(control);
+
+	return ret;
 }
 
 static int bridge_channel_depart(struct stasis_app_control *control,
 	struct ast_channel *chan, void *data)
 {
-	struct ast_bridge_channel *bridge_channel = data;
+	struct ast_bridge_channel *bridge_channel;
 
-	{
-		SCOPED_CHANNELLOCK(lock, chan);
+	ast_channel_lock(chan);
+	bridge_channel = ast_channel_internal_bridge_channel(chan);
+	ast_channel_unlock(chan);
 
-		if (bridge_channel != ast_channel_internal_bridge_channel(chan)) {
-			ast_debug(3, "%s: Channel is no longer in departable state\n",
-				ast_channel_uniqueid(chan));
-			return -1;
-		}
+	if (bridge_channel != data) {
+		ast_debug(3, "%s: Channel is no longer in departable state\n",
+			ast_channel_uniqueid(chan));
+		return -1;
 	}
 
 	ast_debug(3, "%s: Channel departing bridge\n",
@@ -927,14 +1053,21 @@ static int bridge_channel_depart(struct stasis_app_control *control,
 	return 0;
 }
 
-static void bridge_after_cb(struct ast_channel *chan, void *data)
+static void internal_bridge_after_cb(struct ast_channel *chan, void *data,
+	enum ast_bridge_after_cb_reason reason)
 {
 	struct stasis_app_control *control = data;
-	SCOPED_AO2LOCK(lock, control);
 	struct ast_bridge_channel *bridge_channel;
 
-	ast_debug(3, "%s, %s: Channel leaving bridge\n",
-		ast_channel_uniqueid(chan), control->bridge->uniqueid);
+	ao2_lock(control);
+	ast_debug(3, "%s, %s: %s\n",
+		ast_channel_uniqueid(chan), control->bridge ? control->bridge->uniqueid : "unknown",
+			ast_bridge_after_cb_reason_string(reason));
+
+	if (reason == AST_BRIDGE_AFTER_CB_REASON_IMPART_FAILED) {
+		/* The impart actually failed so control->bridge isn't valid. */
+		control->bridge = NULL;
+	}
 
 	ast_assert(chan == control->channel);
 
@@ -942,18 +1075,21 @@ static void bridge_after_cb(struct ast_channel *chan, void *data)
 	ast_channel_pbx_set(control->channel, control->pbx);
 	control->pbx = NULL;
 
-	app_unsubscribe_bridge(control->app, control->bridge);
+	if (control->bridge) {
+		app_unsubscribe_bridge(control->app, control->bridge);
 
-	/* No longer in the bridge */
-	control->bridge = NULL;
+		/* No longer in the bridge */
+		control->bridge = NULL;
 
-	/* Get the bridge channel so we don't depart from the wrong bridge */
-	ast_channel_lock(chan);
-	bridge_channel = ast_channel_get_bridge_channel(chan);
-	ast_channel_unlock(chan);
+		/* Get the bridge channel so we don't depart from the wrong bridge */
+		ast_channel_lock(chan);
+		bridge_channel = ast_channel_get_bridge_channel(chan);
+		ast_channel_unlock(chan);
 
-	/* Depart this channel from the bridge using the command queue if possible */
-	stasis_app_send_command_async(control, bridge_channel_depart, bridge_channel, __ao2_cleanup);
+		/* Depart this channel from the bridge using the command queue if possible */
+		stasis_app_send_command_async(control, bridge_channel_depart, bridge_channel, __ao2_cleanup);
+	}
+
 	if (stasis_app_channel_is_stasis_end_published(chan)) {
 		/* The channel has had a StasisEnd published on it, but until now had remained in
 		 * the bridging system. This means that the channel moved from a Stasis bridge to a
@@ -969,6 +1105,14 @@ static void bridge_after_cb(struct ast_channel *chan, void *data)
 		ast_softhangup_nolock(chan, hangup_flag);
 		ast_channel_unlock(chan);
 	}
+	ao2_unlock(control);
+}
+
+static void bridge_after_cb(struct ast_channel *chan, void *data)
+{
+	struct stasis_app_control *control = data;
+
+	internal_bridge_after_cb(control->channel, data, AST_BRIDGE_AFTER_CB_REASON_DEPART);
 }
 
 static void bridge_after_cb_failed(enum ast_bridge_after_cb_reason reason,
@@ -976,7 +1120,7 @@ static void bridge_after_cb_failed(enum ast_bridge_after_cb_reason reason,
 {
 	struct stasis_app_control *control = data;
 
-	bridge_after_cb(control->channel, data);
+	internal_bridge_after_cb(control->channel, data, reason);
 
 	ast_debug(3, "  reason: %s\n",
 		ast_bridge_after_cb_reason_string(reason));
@@ -1014,42 +1158,53 @@ int control_swap_channel_in_bridge(struct stasis_app_control *control, struct as
 		return -1;
 	}
 
-	{
-		/* pbx and bridge are modified by the bridging impart thread.
-		 * It shouldn't happen concurrently, but we still need to lock
-		 * for the memory fence.
-		 */
-		SCOPED_AO2LOCK(lock, control);
+	ao2_lock(control);
 
-		/* Ensure the controlling application is subscribed early enough
-		 * to receive the ChannelEnteredBridge message. This works in concert
-		 * with the subscription handled in the Stasis application execution
-		 * loop */
-		app_subscribe_bridge(control->app, bridge);
+	/* Ensure the controlling application is subscribed early enough
+	 * to receive the ChannelEnteredBridge message. This works in concert
+	 * with the subscription handled in the Stasis application execution
+	 * loop */
+	app_subscribe_bridge(control->app, bridge);
 
-		/* Save off the channel's PBX */
-		ast_assert(control->pbx == NULL);
-		if (!control->pbx) {
-			control->pbx = ast_channel_pbx(chan);
-			ast_channel_pbx_set(chan, NULL);
-		}
-
-		res = ast_bridge_impart(bridge,
-			chan,
-			swap,
-			NULL, /* features */
-			AST_BRIDGE_IMPART_CHAN_DEPARTABLE);
-		if (res != 0) {
-			ast_log(LOG_ERROR, "Error adding channel to bridge\n");
-			ast_channel_pbx_set(chan, control->pbx);
-			control->pbx = NULL;
-			return -1;
-		}
-
-		ast_assert(stasis_app_get_bridge(control) == NULL);
-		control->bridge = bridge;
+	/* Save off the channel's PBX */
+	ast_assert(control->pbx == NULL);
+	if (!control->pbx) {
+		control->pbx = ast_channel_pbx(chan);
+		ast_channel_pbx_set(chan, NULL);
 	}
-	return 0;
+
+	ast_assert(stasis_app_get_bridge(control) == NULL);
+	/* We need to set control->bridge here since bridge_after_cb may be run
+	 * before ast_bridge_impart returns.  bridge_after_cb gets a reason
+	 * code so it can tell if the bridge is actually valid or not.
+	 */
+	control->bridge = bridge;
+
+	/* We can't be holding the control lock while impart is running
+	 * or we could create a deadlock with bridge_after_cb which also
+	 * tries to lock control.
+	 */
+	ao2_unlock(control);
+	res = ast_bridge_impart(bridge,
+		chan,
+		swap,
+		NULL, /* features */
+		AST_BRIDGE_IMPART_CHAN_DEPARTABLE);
+	if (res != 0) {
+		/* ast_bridge_impart failed before it could spawn the depart
+		 * thread.  The callbacks aren't called in this case.
+		 * The impart could still fail even if ast_bridge_impart returned
+		 * ok but that's handled by bridge_after_cb.
+		 */
+		ast_log(LOG_ERROR, "Error adding channel to bridge\n");
+		ao2_lock(control);
+		ast_channel_pbx_set(chan, control->pbx);
+		control->pbx = NULL;
+		control->bridge = NULL;
+		ao2_unlock(control);
+	}
+
+	return res;
 }
 
 int control_add_channel_to_bridge(struct stasis_app_control *control, struct ast_channel *chan, void *data)
@@ -1209,4 +1364,33 @@ int control_prestart_dispatch_all(struct stasis_app_control *control,
 struct stasis_app *control_app(struct stasis_app_control *control)
 {
 	return control->app;
+}
+
+void control_set_app(struct stasis_app_control *control, struct stasis_app *app)
+{
+	ao2_cleanup(control->app);
+	control->app = ao2_bump(app);
+}
+
+char *control_next_app(struct stasis_app_control *control)
+{
+	return control->next_app;
+}
+
+void control_move_cleanup(struct stasis_app_control *control)
+{
+	ast_free(control->next_app);
+	control->next_app = NULL;
+
+	AST_VECTOR_RESET(&control->next_app_args, ast_free_ptr);
+}
+
+char **control_next_app_args(struct stasis_app_control *control)
+{
+	return AST_VECTOR_STEAL_ELEMENTS(&control->next_app_args);
+}
+
+int control_next_app_args_size(struct stasis_app_control *control)
+{
+	return AST_VECTOR_SIZE(&control->next_app_args);
 }

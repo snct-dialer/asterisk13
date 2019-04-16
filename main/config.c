@@ -45,8 +45,6 @@ ASTERISK_FILE_VERSION(__FILE__, "$Revision$")
 #include <math.h>	/* HUGE_VAL */
 #include <regex.h>
 
-#define AST_INCLUDE_GLOB 1
-
 #include "asterisk/config.h"
 #include "asterisk/cli.h"
 #include "asterisk/lock.h"
@@ -988,13 +986,15 @@ struct ast_category *ast_category_new_template(const char *name, const char *in_
 }
 
 static struct ast_category *category_get_sep(const struct ast_config *config,
-	const char *category_name, const char *filter, char sep)
+	const char *category_name, const char *filter, char sep, char pointer_match_possible)
 {
 	struct ast_category *cat;
 
-	for (cat = config->root; cat; cat = cat->next) {
-		if (cat->name == category_name && does_category_match(cat, category_name, filter, sep)) {
-			return cat;
+	if (pointer_match_possible) {
+		for (cat = config->root; cat; cat = cat->next) {
+			if (cat->name == category_name && does_category_match(cat, category_name, filter, sep)) {
+				return cat;
+			}
 		}
 	}
 
@@ -1010,7 +1010,7 @@ static struct ast_category *category_get_sep(const struct ast_config *config,
 struct ast_category *ast_category_get(const struct ast_config *config,
 	const char *category_name, const char *filter)
 {
-	return category_get_sep(config, category_name, filter, ',');
+	return category_get_sep(config, category_name, filter, ',', 1);
 }
 
 const char *ast_category_get_name(const struct ast_category *category)
@@ -1736,7 +1736,7 @@ static int process_text_line(struct ast_config *cfg, struct ast_category **cat,
 	char *c;
 	char *cur = buf;
 	struct ast_variable *v;
-	char cmd[512], exec_file[512];
+	char exec_file[512];
 
 	/* Actually parse the entry */
 	if (cur[0] == '[') { /* A category header */
@@ -1794,7 +1794,7 @@ static int process_text_line(struct ast_config *cfg, struct ast_category **cat,
 					if (cur[1] != ',') {
 						filter = &cur[1];
 					}
-					*cat = category_get_sep(cfg, catname, filter, '&');
+					*cat = category_get_sep(cfg, catname, filter, '&', 0);
 					if (!(*cat)) {
 						if (newcat) {
 							ast_category_destroy(newcat);
@@ -1812,7 +1812,7 @@ static int process_text_line(struct ast_config *cfg, struct ast_category **cat,
 				} else {
 					struct ast_category *base;
 
-					base = ast_category_get(cfg, cur, "TEMPLATES=include");
+					base = category_get_sep(cfg, cur, "TEMPLATES=include", ',', 0);
 					if (!base) {
 						if (newcat) {
 							ast_category_destroy(newcat);
@@ -1909,10 +1909,16 @@ static int process_text_line(struct ast_config *cfg, struct ast_category **cat,
 		   We create a tmp file, then we #include it, then we delete it. */
 		if (!do_include) {
 			struct timeval now = ast_tvnow();
+			char cmd[1024];
+
 			if (!ast_test_flag(&flags, CONFIG_FLAG_NOCACHE))
 				config_cache_attribute(configfile, ATTRIBUTE_EXEC, NULL, who_asked);
 			snprintf(exec_file, sizeof(exec_file), "/var/tmp/exec.%d%d.%ld", (int)now.tv_sec, (int)now.tv_usec, (long)pthread_self());
-			snprintf(cmd, sizeof(cmd), "%s > %s 2>&1", cur, exec_file);
+			if (snprintf(cmd, sizeof(cmd), "%s > %s 2>&1", cur, exec_file) >= sizeof(cmd)) {
+				ast_log(LOG_ERROR, "Failed to construct command string to execute %s.\n", cur);
+
+				return -1;
+			}
 			ast_safe_system(cmd);
 			cur = exec_file;
 		} else {
@@ -2043,10 +2049,8 @@ static struct ast_config *config_text_file_load(const char *database, const char
 	/*! Growable string buffer */
 	struct ast_str *comment_buffer = NULL;	/*!< this will be a comment collector.*/
 	struct ast_str *lline_buffer = NULL;	/*!< A buffer for stuff behind the ; */
-#ifdef AST_INCLUDE_GLOB
 	int glob_ret;
 	glob_t globbuf;
-#endif
 
 	if (cfg) {
 		cat = ast_config_get_current_category(cfg);
@@ -2069,7 +2073,7 @@ static struct ast_config *config_text_file_load(const char *database, const char
 			return NULL;
 		}
 	}
-#ifdef AST_INCLUDE_GLOB
+
 	globbuf.gl_offs = 0;	/* initialize it to silence gcc */
 	glob_ret = glob(fn, MY_GLOB_FLAGS, NULL, &globbuf);
 	if (glob_ret == GLOB_NOSPACE) {
@@ -2097,7 +2101,7 @@ static struct ast_config *config_text_file_load(const char *database, const char
 		}
 		for (i=0; i<globbuf.gl_pathc; i++) {
 			ast_copy_string(fn, globbuf.gl_pathv[i], sizeof(fn));
-#endif
+
 			/*
 			 * The following is not a loop, but just a convenient way to define a block
 			 * (using do { } while(0) ), and be able to exit from it with 'continue'
@@ -2156,9 +2160,7 @@ static struct ast_config *config_text_file_load(const char *database, const char
 
 					if (unchanged) {
 						AST_LIST_UNLOCK(&cfmtime_head);
-#ifdef AST_INCLUDE_GLOB
 						globfree(&globbuf);
-#endif
 						ast_free(comment_buffer);
 						ast_free(lline_buffer);
 						return CONFIG_STATUS_FILEUNCHANGED;
@@ -2191,15 +2193,14 @@ static struct ast_config *config_text_file_load(const char *database, const char
 				/* If we get to this point, then we're loading regardless */
 				ast_clear_flag(&flags, CONFIG_FLAG_FILEUNCHANGED);
 				ast_debug(1, "Parsing %s\n", fn);
-				ast_verb(2, "Parsing '%s': Found\n", fn);
 				while (!feof(f)) {
 					lineno++;
 					if (fgets(buf, sizeof(buf), f)) {
 						/* Skip lines that are too long */
-						if (strlen(buf) == sizeof(buf) - 1 && buf[sizeof(buf) - 1] != '\n') {
+						if (strlen(buf) == sizeof(buf) - 1 && buf[sizeof(buf) - 2] != '\n') {
 							ast_log(LOG_WARNING, "Line %d too long, skipping. It begins with: %.32s...\n", lineno, buf);
 							while (fgets(buf, sizeof(buf), f)) {
-								if (strlen(buf) != sizeof(buf) - 1 || buf[sizeof(buf) - 1] == '\n') {
+								if (strlen(buf) != sizeof(buf) - 1 || buf[sizeof(buf) - 2] == '\n') {
 									break;
 								}
 							}
@@ -2333,14 +2334,12 @@ static struct ast_config *config_text_file_load(const char *database, const char
 			if (comment) {
 				ast_log(LOG_WARNING,"Unterminated comment detected beginning on line %d\n", nest[comment - 1]);
 			}
-#ifdef AST_INCLUDE_GLOB
 			if (cfg == NULL || cfg == CONFIG_STATUS_FILEUNCHANGED || cfg == CONFIG_STATUS_FILEINVALID) {
 				break;
 			}
 		}
 		globfree(&globbuf);
 	}
-#endif
 
 	ast_free(comment_buffer);
 	ast_free(lline_buffer);
@@ -2546,7 +2545,8 @@ int ast_config_text_file_save2(const char *configfile, const struct ast_config *
 	struct ao2_container *fileset;
 	struct inclfile *fi;
 
-	fileset = ao2_container_alloc(1023, hash_string, hashtab_compare_strings);
+	fileset = ao2_container_alloc_hash(AO2_ALLOC_OPT_LOCK_MUTEX, 0, 1023,
+		hash_string, NULL, hashtab_compare_strings);
 	if (!fileset) {
 		/* Container creation failed. */
 		return -1;
@@ -2786,9 +2786,7 @@ int ast_config_text_file_save2(const char *configfile, const struct ast_config *
 			}
 			cat = cat->next;
 		}
-		if (!option_debug) {
-			ast_verb(2, "Saving '%s': saved\n", fn);
-		}
+		ast_verb(2, "Saving '%s': saved\n", fn);
 	} else {
 		ast_debug(1, "Unable to open for writing: %s\n", fn);
 		ast_verb(2, "Unable to write '%s' (%s)\n", fn, strerror(errno));
@@ -2839,8 +2837,6 @@ int ast_config_text_file_save2(const char *configfile, const struct ast_config *
 static void clear_config_maps(void)
 {
 	struct ast_config_map *map;
-
-	SCOPED_MUTEX(lock, &config_lock);
 
 	while (config_maps) {
 		map = config_maps;
@@ -2895,6 +2891,7 @@ int read_config_maps(void)
 	char *driver, *table, *database, *textpri, *stringp, *tmp;
 	struct ast_flags flags = { CONFIG_FLAG_NOREALTIME };
 	int pri;
+	SCOPED_MUTEX(lock, &config_lock);
 
 	clear_config_maps();
 
@@ -3573,7 +3570,7 @@ int ast_destroy_realtime_fields(const char *family, const char *keyfield, const 
 
 	for (i = 1; ; i++) {
 		if ((eng = find_engine(family, i, db, sizeof(db), table, sizeof(table)))) {
-			if (eng->destroy_func && !(res = eng->destroy_func(db, table, keyfield, lookup, fields))) {
+			if (eng->destroy_func && ((res = eng->destroy_func(db, table, keyfield, lookup, fields)) >= 0)) {
 				break;
 			}
 		} else {
@@ -3743,6 +3740,55 @@ uint32_done:
 		break;
 	}
 
+	case PARSE_TIMELEN:
+	{
+		int x = 0;
+		int *result = p_result;
+		int def = result ? *result : 0;
+		int high = INT_MAX;
+		int low = INT_MIN;
+		enum ast_timelen defunit;
+
+		defunit = va_arg(ap, enum ast_timelen);
+		/* optional arguments: default value and/or (low, high) */
+		if (flags & PARSE_DEFAULT) {
+			def = va_arg(ap, int);
+		}
+		if (flags & (PARSE_IN_RANGE | PARSE_OUT_RANGE)) {
+			low = va_arg(ap, int);
+			high = va_arg(ap, int);
+		}
+		if (ast_strlen_zero(arg)) {
+			error = 1;
+			goto timelen_done;
+		}
+		error = ast_app_parse_timelen(arg, &x, defunit);
+		if (error || x < INT_MIN || x > INT_MAX) {
+			/* Parse error, or type out of int bounds */
+			error = 1;
+			goto timelen_done;
+		}
+		error = (x < low) || (x > high);
+		if (flags & PARSE_RANGE_DEFAULTS) {
+			if (x < low) {
+				def = low;
+			} else if (x > high) {
+				def = high;
+			}
+		}
+		if (flags & PARSE_OUT_RANGE) {
+			error = !error;
+		}
+timelen_done:
+		if (result) {
+			*result  = error ? def : x;
+		}
+
+		ast_debug(3, "extract timelen from [%s] in [%d, %d] gives [%d](%d)\n",
+				arg, low, high, result ? *result : x, error);
+		break;
+	}
+
 	case PARSE_DOUBLE:
 	{
 		double *result = p_result;
@@ -3887,8 +3933,8 @@ static char *handle_cli_core_show_config_mappings(struct ast_cli_entry *e, int c
 static char *handle_cli_config_reload(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a)
 {
 	struct cache_file_mtime *cfmtime;
-	char *prev = "", *completion_value = NULL;
-	int wordlen, which = 0;
+	char *prev = "";
+	int wordlen;
 
 	switch (cmd) {
 	case CLI_INIT:
@@ -3906,19 +3952,20 @@ static char *handle_cli_config_reload(struct ast_cli_entry *e, int cmd, struct a
 
 		AST_LIST_LOCK(&cfmtime_head);
 		AST_LIST_TRAVERSE(&cfmtime_head, cfmtime, list) {
-			/* Skip duplicates - this only works because the list is sorted by filename */
-			if (strcmp(cfmtime->filename, prev) == 0) {
-				continue;
-			}
-
 			/* Core configs cannot be reloaded */
 			if (ast_strlen_zero(cfmtime->who_asked)) {
 				continue;
 			}
 
-			if (++which > a->n && strncmp(cfmtime->filename, a->word, wordlen) == 0) {
-				completion_value = ast_strdup(cfmtime->filename);
-				break;
+			/* Skip duplicates - this only works because the list is sorted by filename */
+			if (!strcmp(cfmtime->filename, prev)) {
+				continue;
+			}
+
+			if (!strncmp(cfmtime->filename, a->word, wordlen)) {
+				if (ast_cli_completion_add(ast_strdup(cfmtime->filename))) {
+					break;
+				}
 			}
 
 			/* Otherwise save that we've seen this filename */
@@ -3926,7 +3973,7 @@ static char *handle_cli_config_reload(struct ast_cli_entry *e, int cmd, struct a
 		}
 		AST_LIST_UNLOCK(&cfmtime_head);
 
-		return completion_value;
+		return NULL;
 	}
 
 	if (a->argc != 3) {
@@ -4066,8 +4113,12 @@ int ast_config_hook_register(const char *name,
 		config_hook_cb hook_cb)
 {
 	struct cfg_hook *hook;
-	if (!cfg_hooks && !(cfg_hooks = ao2_container_alloc(17, hook_hash, hook_cmp))) {
-		return -1;
+	if (!cfg_hooks) {
+		cfg_hooks = ao2_container_alloc_hash(AO2_ALLOC_OPT_LOCK_MUTEX, 0, 17,
+			hook_hash, NULL, hook_cmp);
+		if (!cfg_hooks) {
+			return -1;
+		}
 	}
 
 	if (!(hook = ao2_alloc(sizeof(*hook), hook_destroy))) {

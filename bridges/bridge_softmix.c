@@ -54,6 +54,7 @@ ASTERISK_FILE_VERSION(__FILE__, "$Revision$")
 #include "asterisk/astobj2.h"
 #include "asterisk/timing.h"
 #include "asterisk/translate.h"
+#include "asterisk/message.h"
 
 #define MAX_DATALEN 8096
 
@@ -72,9 +73,16 @@ ASTERISK_FILE_VERSION(__FILE__, "$Revision$")
 /*! \brief Number of mixing iterations to perform between gathering statistics. */
 #define SOFTMIX_STAT_INTERVAL 100
 
-/* This is the threshold in ms at which a channel's own audio will stop getting
- * mixed out its own write audio stream because it is not talking. */
+/*!
+ * \brief Default time in ms of silence necessary to declare talking stopped by the bridge.
+ *
+ * \details
+ * This is the time at which a channel's own audio will stop getting
+ * mixed out of its own write audio stream because it is no longer talking.
+ */
 #define DEFAULT_SOFTMIX_SILENCE_THRESHOLD 2500
+
+/*! Default minimum average magnitude threshold to determine talking by the DSP. */
 #define DEFAULT_SOFTMIX_TALKING_THRESHOLD 160
 
 #define DEFAULT_ENERGY_HISTORY_LEN 150
@@ -578,12 +586,17 @@ static void softmix_bridge_write_voice(struct ast_bridge *bridge, struct ast_bri
 {
 	struct softmix_channel *sc = bridge_channel->tech_pvt;
 	struct softmix_bridge_data *softmix_data = bridge->tech_pvt;
+	int silent = 0;
 	int totalsilence = 0;
 	int cur_energy = 0;
 	int silence_threshold = bridge_channel->tech_args.silence_threshold ?
 		bridge_channel->tech_args.silence_threshold :
 		DEFAULT_SOFTMIX_SILENCE_THRESHOLD;
-	char update_talking = -1;  /* if this is set to 0 or 1, tell the bridge that the channel has started or stopped talking. */
+	/*
+	 * If update_talking is set to 0 or 1, tell the bridge that the channel
+	 * has started or stopped talking.
+	 */
+	char update_talking = -1;
 
 	/* Write the frame into the conference */
 	ast_mutex_lock(&sc->lock);
@@ -611,7 +624,7 @@ static void softmix_bridge_write_voice(struct ast_bridge *bridge, struct ast_bri
 
 	/* The channel will be leaving soon if there is no dsp. */
 	if (sc->dsp) {
-		ast_dsp_silence_with_energy(sc->dsp, frame, &totalsilence, &cur_energy);
+		silent = ast_dsp_silence_with_energy(sc->dsp, frame, &totalsilence, &cur_energy);
 	}
 
 	if (bridge->softmix.video_mode.mode == AST_BRIDGE_VIDEO_MODE_TALKER_SRC) {
@@ -628,15 +641,16 @@ static void softmix_bridge_write_voice(struct ast_bridge *bridge, struct ast_bri
 	}
 
 	if (totalsilence < silence_threshold) {
-		if (!sc->talking) {
+		if (!sc->talking && !silent) {
+			/* Tell the write process we have audio to be mixed out */
+			sc->talking = 1;
 			update_talking = 1;
 		}
-		sc->talking = 1; /* tell the write process we have audio to be mixed out */
 	} else {
 		if (sc->talking) {
+			sc->talking = 0;
 			update_talking = 0;
 		}
-		sc->talking = 0;
 	}
 
 	/* Before adding audio in, make sure we haven't fallen behind. If audio has fallen
@@ -646,9 +660,8 @@ static void softmix_bridge_write_voice(struct ast_bridge *bridge, struct ast_bri
 		ast_slinfactory_flush(&sc->factory);
 	}
 
-	/* If a frame was provided add it to the smoother, unless drop silence is enabled and this frame
-	 * is not determined to be talking. */
-	if (!(bridge_channel->tech_args.drop_silence && !sc->talking)) {
+	if (sc->talking || !bridge_channel->tech_args.drop_silence) {
+		/* Add frame to the smoother for mixing with other channels. */
 		ast_slinfactory_feed(&sc->factory, frame);
 	}
 
@@ -658,6 +671,89 @@ static void softmix_bridge_write_voice(struct ast_bridge *bridge, struct ast_bri
 	if (update_talking != -1) {
 		ast_bridge_channel_notify_talking(bridge_channel, update_talking);
 	}
+}
+
+/*!
+ * \internal
+ * \brief Clear talking flag, stop contributing to mixing and notify handlers.
+ * \since 13.21.0, 15.4.0
+ *
+ * \param bridge_channel Which channel's talking to clear
+ *
+ * \return Nothing
+ */
+static void clear_talking(struct ast_bridge_channel *bridge_channel)
+{
+	struct softmix_channel *sc = bridge_channel->tech_pvt;
+
+	if (sc->talking) {
+		ast_mutex_lock(&sc->lock);
+		ast_slinfactory_flush(&sc->factory);
+		sc->talking = 0;
+		ast_mutex_unlock(&sc->lock);
+
+		/* Notify that we are no longer talking. */
+		ast_bridge_channel_notify_talking(bridge_channel, 0);
+	}
+}
+
+/*!
+ * \internal
+ * \brief Check for voice status updates.
+ * \since 13.20.0
+ *
+ * \param bridge Which bridge we are in
+ * \param bridge_channel Which channel we are checking
+ *
+ * \return Nothing
+ */
+static void softmix_bridge_check_voice(struct ast_bridge *bridge, struct ast_bridge_channel *bridge_channel)
+{
+	if (bridge_channel->features->mute) {
+		/*
+		 * We were muted while we were talking.
+		 *
+		 * Immediately stop contributing to mixing
+		 * and report no longer talking.
+		 */
+		clear_talking(bridge_channel);
+	}
+}
+
+/*!
+ * \internal
+ * \brief Determine what to do with a text frame.
+ * \since 13.22.0
+ * \since 15.5.0
+ *
+ * \param bridge Which bridge is getting the frame
+ * \param bridge_channel Which channel is writing the frame.
+ * \param frame What is being written.
+ *
+ * \return Nothing
+ */
+static void softmix_bridge_write_text(struct ast_bridge *bridge,
+	struct ast_bridge_channel *bridge_channel, struct ast_frame *frame)
+{
+	if (DEBUG_ATLEAST(1)) {
+		struct ast_msg_data *msg = frame->data.ptr;
+		char frame_type[64];
+
+		ast_frame_type2str(frame->frametype, frame_type, sizeof(frame_type));
+
+		if (frame->frametype == AST_FRAME_TEXT_DATA) {
+			ast_log(LOG_DEBUG, "Received %s frame from '%s:%s': %s\n", frame_type,
+				ast_msg_data_get_attribute(msg, AST_MSG_DATA_ATTR_FROM),
+				ast_channel_name(bridge_channel->chan),
+				ast_msg_data_get_attribute(msg, AST_MSG_DATA_ATTR_BODY));
+		} else {
+			ast_log(LOG_DEBUG, "Received %s frame from '%s': %.*s\n", frame_type,
+				ast_channel_name(bridge_channel->chan), frame->datalen,
+				(char *)frame->data.ptr);
+		}
+	}
+
+	ast_bridge_queue_everyone_else(bridge, bridge_channel, frame);
 }
 
 /*!
@@ -680,6 +776,17 @@ static int softmix_bridge_write_control(struct ast_bridge *bridge, struct ast_br
 	 */
 
 	switch (frame->subclass.integer) {
+	case AST_CONTROL_HOLD:
+		/*
+		 * Doing anything for holds in a conference bridge could be considered a bit
+		 * odd. That being said, in most cases one would probably want the talking
+		 * flag cleared when 'hold' is pressed by the remote endpoint, so go ahead
+		 * and do that here. However, that is all we'll do. Meaning if for some reason
+		 * the endpoint continues to send audio frames despite pressing 'hold' talking
+		 * will once again be detected for that channel.
+		 */
+		clear_talking(bridge_channel);
+		break;
 	case AST_CONTROL_VIDUPDATE:
 		ast_bridge_queue_everyone_else(bridge, NULL, frame);
 		break;
@@ -721,20 +828,21 @@ static int softmix_bridge_write(struct ast_bridge *bridge, struct ast_bridge_cha
 	switch (frame->frametype) {
 	case AST_FRAME_NULL:
 		/* "Accept" the frame and discard it. */
+		softmix_bridge_check_voice(bridge, bridge_channel);
 		break;
 	case AST_FRAME_DTMF_BEGIN:
 	case AST_FRAME_DTMF_END:
 		res = ast_bridge_queue_everyone_else(bridge, bridge_channel, frame);
 		break;
 	case AST_FRAME_VOICE:
-		if (bridge_channel) {
-			softmix_bridge_write_voice(bridge, bridge_channel, frame);
-		}
+		softmix_bridge_write_voice(bridge, bridge_channel, frame);
 		break;
 	case AST_FRAME_VIDEO:
-		if (bridge_channel) {
-			softmix_bridge_write_video(bridge, bridge_channel, frame);
-		}
+		softmix_bridge_write_video(bridge, bridge_channel, frame);
+		break;
+	case AST_FRAME_TEXT:
+	case AST_FRAME_TEXT_DATA:
+		softmix_bridge_write_text(bridge, bridge_channel, frame);
 		break;
 	case AST_FRAME_CONTROL:
 		res = softmix_bridge_write_control(bridge, bridge_channel, frame);

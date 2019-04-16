@@ -35,6 +35,7 @@
 
 /*** MODULEINFO
 	<depend>res_odbc</depend>
+	<depend>generic_odbc</depend>
 	<support_level>core</support_level>
  ***/
 
@@ -326,7 +327,7 @@ static SQLHSTMT generic_prepare(struct odbc_obj *obj, void *data)
 		return NULL;
 	}
 
-	res = SQLPrepare(stmt, (unsigned char *) data, SQL_NTS);
+	res = ast_odbc_prepare(obj, stmt, data);
 	if ((res != SQL_SUCCESS) && (res != SQL_SUCCESS_WITH_INFO)) {
 		ast_log(LOG_WARNING, "SQL Prepare failed![%s]\n", (char *) data);
 		SQLGetDiagField(SQL_HANDLE_STMT, stmt, 1, SQL_DIAG_NUMBER, &numfields, SQL_IS_INTEGER, &diagbytes);
@@ -815,4 +816,3 @@ AST_MODULE_INFO(ASTERISK_GPL_KEY, AST_MODFLAG_LOAD_ORDER, "Adaptive ODBC CDR bac
 	.reload = reload,
 	.load_pri = AST_MODPRI_CDR_DRIVER,
 );
-

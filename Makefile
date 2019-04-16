@@ -104,8 +104,11 @@ export PATCH
 export SED
 export NM
 
-# makeopts is required unless the goal is clean or distclean
-ifeq ($(findstring clean,$(MAKECMDGOALS)),)
+# makeopts is required unless the goal is just {dist{-}}clean
+ifeq ($(MAKECMDGOALS),clean)
+else ifeq ($(MAKECMDGOALS),distclean)
+else ifeq ($(MAKECMDGOALS),dist-clean)
+else
 include makeopts
 endif
 
@@ -210,10 +213,14 @@ ifeq ($(AST_DEVMODE),yes)
   ifeq ($(AST_DEVMODE_STRICT),yes)
     _ASTCFLAGS+=-Wshadow
   endif
-  ADDL_TARGETS+=validate-docs
+  ifneq ($(DISABLE_XMLDOC),yes)
+    ADDL_TARGETS+=validate-docs
+  endif
 endif
 
-ifneq ($(findstring BSD,$(OSARCH)),)
+ifeq ($(OSARCH),NetBSD)
+  _ASTCFLAGS+=-isystem /usr/pkg/include
+else ifneq ($(findstring BSD,$(OSARCH)),)
   _ASTCFLAGS+=-isystem /usr/local/include
 endif
 
@@ -224,7 +231,7 @@ ifeq ($(OSARCH),FreeBSD)
 endif
 
 ifeq ($(OSARCH),NetBSD)
-  _ASTCFLAGS+=-pthread -I/usr/pkg/include
+  _ASTCFLAGS+=-pthread -D__LIBPTHREAD_SOURCE__ -I/usr/pkg/include
 endif
 
 ifeq ($(OSARCH),OpenBSD)
@@ -235,7 +242,9 @@ ifeq ($(OSARCH),SunOS)
   _ASTCFLAGS+=-Wcast-align -DSOLARIS -I../include/solaris-compat -I/opt/ssl/include -I/usr/local/ssl/include -D_XPG4_2 -D__EXTENSIONS__
 endif
 
-ifneq ($(GREP),)
+ifeq ($(GREP),)
+else ifeq ($(GREP),:)
+else
   ASTERISKVERSION:=$(shell GREP=$(GREP) AWK=$(AWK) GIT=$(GIT) build_tools/make_version .)
 endif
 ifneq ($(AWK),)
@@ -246,6 +255,14 @@ endif
 
 ifneq ($(wildcard .svn),)
   ASTERISKVERSIONNUM:=999999
+endif
+
+ifneq ($(DISABLE_XMLDOC),yes)
+  CORE_XMLDOC=doc/core-en_US.xml
+  FULL_XMLDOC=doc/full-en_US.xml
+else
+  CORE_XMLDOC=
+  FULL_XMLDOC=
 endif
 
 _ASTCFLAGS+=$(OPTIONS)
@@ -270,7 +287,9 @@ else
 # These are used for all but Darwin
   SOLINK=-shared
   DYLINK=$(SOLINK)
-  ifneq ($(findstring BSD,$(OSARCH)),)
+  ifeq ($(OSARCH),NetBSD)
+    _ASTLDFLAGS+=-L/usr/pkg/lib
+  else ifneq ($(findstring BSD,$(OSARCH)),)
     _ASTLDFLAGS+=-L/usr/local/lib
   endif
 endif
@@ -328,9 +347,9 @@ full: _full
 	@echo " +-------------------------------------------+"
 
 
-_all: makeopts $(SUBDIRS) doc/core-en_US.xml $(ADDL_TARGETS)
+_all: makeopts $(SUBDIRS) $(CORE_XMLDOC) $(ADDL_TARGETS)
 
-_full: makeopts $(SUBDIRS) doc/full-en_US.xml $(ADDL_TARGETS)
+_full: makeopts $(SUBDIRS) $(FULL_XMLDOC) $(ADDL_TARGETS)
 
 makeopts: configure
 	@echo "****"
@@ -425,7 +444,7 @@ distclean: $(SUBDIRS_DIST_CLEAN) _clean
 	rm -f doc/asterisk-ng-doxygen
 	rm -f build_tools/menuselect-deps
 
-datafiles: _all doc/core-en_US.xml
+datafiles: _all $(CORE_XMLDOC)
 	CFLAGS="$(_ASTCFLAGS) $(ASTCFLAGS)" build_tools/mkpkgconfig "$(DESTDIR)$(libdir)/pkgconfig";
 
 #	# Recursively install contents of the static-http directory, in case
@@ -437,8 +456,10 @@ datafiles: _all doc/core-en_US.xml
 			$(INSTALL) -m 644 $$x "$(DESTDIR)$(ASTDATADIR)/$$x" ; \
 		fi \
 	done
+ifneq ($(DISABLE_XMLDOC),yes)
 	$(INSTALL) -m 644 doc/core-en_US.xml "$(DESTDIR)$(ASTDATADIR)/static-http";
 	$(INSTALL) -m 644 doc/appdocsxml.xslt "$(DESTDIR)$(ASTDATADIR)/static-http";
+endif
 	if [ -d doc/tex/asterisk ] ; then \
 		$(INSTALL) -d "$(DESTDIR)$(ASTDATADIR)/static-http/docs" ; \
 		for n in doc/tex/asterisk/* ; do \
@@ -453,7 +474,9 @@ datafiles: _all doc/core-en_US.xml
 		$(INSTALL) -m 644 $$x "$(DESTDIR)$(ASTDATADIR)/rest-api" ; \
 	done
 
-ifneq ($(GREP),)
+ifeq ($(GREP),)
+else ifeq ($(GREP),:)
+else
   XML_core_en_US = $(foreach dir,$(MOD_SUBDIRS),$(shell $(GREP) -l "language=\"en_US\"" $(dir)/*.c $(dir)/*.cc 2>/dev/null))
 endif
 
@@ -472,7 +495,9 @@ doc/core-en_US.xml: makeopts .lastclean $(XML_core_en_US)
 	@echo
 	@echo "</docs>" >> $@
 
-ifneq ($(GREP),)
+ifeq ($(GREP),)
+else ifeq ($(GREP),:)
+else
   XML_full_en_US = $(foreach dir,$(MOD_SUBDIRS),$(shell $(GREP) -l "language=\"en_US\"" $(dir)/*.c $(dir)/*.cc 2>/dev/null))
 endif
 
@@ -487,7 +512,7 @@ else
 	@echo "<!DOCTYPE docs SYSTEM \"appdocsxml.dtd\">" >> $@
 	@echo "<?xml-stylesheet type=\"text/xsl\" href=\"appdocsxml.xslt\"?>" >> $@
 	@echo "<docs xmlns:xi=\"http://www.w3.org/2001/XInclude\">" >> $@
-	@for x in $(MOD_SUBDIRS); do \
+	@for x in $(filter-out third-party,$(MOD_SUBDIRS)); do \
 		printf "$$x " ; \
 		for i in `find $$x -name '*.c'`; do \
 			$(PYTHON) build_tools/get_documentation.py < $$i >> $@ ; \
@@ -567,9 +592,11 @@ bininstall: _all installdirs $(SUBDIRS_INSTALL) main-bininstall
 		for h in $(OLDHEADERS); do rm -f "$(DESTDIR)$(ASTHEADERDIR)/$$h"; done \
 	fi
 
+ifneq ($(DISABLE_XMLDOC),yes)
 	$(INSTALL) -m 644 doc/core-*.xml "$(DESTDIR)$(ASTDATADIR)/documentation"
 	$(INSTALL) -m 644 doc/appdocsxml.xslt "$(DESTDIR)$(ASTDATADIR)/documentation"
 	$(INSTALL) -m 644 doc/appdocsxml.dtd "$(DESTDIR)$(ASTDATADIR)/documentation"
+endif
 	$(INSTALL) -m 644 doc/asterisk.8 "$(DESTDIR)$(ASTMANDIR)/man8"
 	$(INSTALL) -m 644 doc/astdb*.8 "$(DESTDIR)$(ASTMANDIR)/man8"
 	$(INSTALL) -m 644 contrib/scripts/astgenkey.8 "$(DESTDIR)$(ASTMANDIR)/man8"
@@ -588,7 +615,12 @@ $(SUBDIRS_INSTALL):
 
 NEWMODS:=$(foreach d,$(MOD_SUBDIRS),$(notdir $(wildcard $(d)/*.so)))
 OLDMODS=$(filter-out $(NEWMODS) $(notdir $(DESTDIR)$(ASTMODDIR)),$(notdir $(wildcard $(DESTDIR)$(ASTMODDIR)/*.so)))
-BADMODS=$(strip $(filter-out $(shell ./build_tools/list_valid_installed_externals),$(OLDMODS)))
+ifneq ($(BASH),:)
+	FILMODS=$(filter-out $(shell ./build_tools/list_valid_installed_externals),$(OLDMODS))
+else
+	FILMODS=$(OLDMODS)
+endif
+BADMODS=$(strip $(FILMODS))
 
 oldmodcheck:
 	@if [ -n "$(BADMODS)" ]; then \
@@ -609,9 +641,11 @@ oldmodcheck:
 	fi
 
 ld-cache-update:
-ifneq ($(LDCONFIG),)
+ifeq ($(LDCONFIG),)
+else ifeq ($(LDCONFIG),:)
+else
 ifeq ($(DESTDIR),)  # DESTDIR means binary archive creation; ldconfig should be run on postinst
-	@if [ $${EUID} -eq 0 ] ; then \
+	@if [ $$(id -u) -eq 0 ] ; then \
 		$(LDCONFIG) "$(ASTLIBDIR)/" ; \
 	else \
 		echo " WARNING WARNING WARNING" ;\
@@ -733,7 +767,7 @@ upgrade: bininstall
 #  (1) the configuration directory to install from
 #  (2) the extension to strip off
 define INSTALL_CONFIGS
-	@for x in configs/$(1)/*$(2); do \
+	@for x in $(1)/*$(2); do \
 		dst="$(DESTDIR)$(ASTETCDIR)/`$(BASENAME) $$x $(2)`"; \
 		if [ -f "$${dst}" ]; then \
 			if [ "$(OVERWRITE)" = "y" ]; then \
@@ -769,6 +803,14 @@ define INSTALL_CONFIGS
 	fi
 endef
 
+install-configs:
+	@if test -z "$(CONFIG_SRC)" -o ! -d "$(CONFIG_SRC)"; then \
+		>&2 echo "CONFIG_SRC must be set to a directory."; \
+		exit 1; \
+	fi
+	@echo "Installing config files from $(CONFIG_SRC)/*$(CONFIG_EXTEN)"
+	$(call INSTALL_CONFIGS,$(CONFIG_SRC),$(CONFIG_EXTEN))
+
 # XXX why *.adsi is installed first ?
 adsi:
 	@echo Installing adsi config files...
@@ -785,7 +827,7 @@ adsi:
 
 samples: adsi
 	@echo Installing other config files...
-	$(call INSTALL_CONFIGS,samples,.sample)
+	$(call INSTALL_CONFIGS,configs/samples,.sample)
 	$(INSTALL) -d "$(DESTDIR)$(ASTSPOOLDIR)/voicemail/default/1234/INBOX"
 	build_tools/make_sample_voicemail "$(DESTDIR)/$(ASTDATADIR)" "$(DESTDIR)/$(ASTSPOOLDIR)"
 	@for x in phoneprov/*; do \
@@ -808,7 +850,7 @@ samples: adsi
 
 basic-pbx:
 	@echo Installing basic-pbx config files...
-	$(call INSTALL_CONFIGS,basic-pbx)
+	$(call INSTALL_CONFIGS,configs/basic-pbx)
 
 webvmail:
 	@[ -d "$(DESTDIR)$(HTTP_DOCSDIR)/" ] || ( printf "http docs directory not found.\nUpdate assignment of variable HTTP_DOCSDIR in Makefile!\n" && exit 1 )
@@ -908,8 +950,20 @@ config:
 		if [ -z "$(DESTDIR)" ] ; then \
 			/sbin/chkconfig --add asterisk ; \
 		fi ; \
+	elif [ -f /etc/os-release ] && [ "opensuse" = "$(shell . /etc/os-release 2>/dev/null && echo $$ID)" ] ; then \
+		./build_tools/install_subst contrib/init.d/rc.suse.asterisk  "$(DESTDIR)/etc/init.d/asterisk"; \
+		if [ ! -f /etc/sysconfig/asterisk ] ; then \
+			$(INSTALL) -m 644 contrib/init.d/etc_default_asterisk "$(DESTDIR)/etc/sysconfig/asterisk" ; \
+		fi ; \
+		if [ -z "$(DESTDIR)" ] ; then \
+			/sbin/chkconfig --add asterisk ; \
+		fi ; \
 	elif [ -f /etc/arch-release -o -f /etc/arch-release ] ; then \
 		./build_tools/install_subst contrib/init.d/rc.archlinux.asterisk  "$(DESTDIR)/etc/init.d/asterisk"; \
+	elif [ -f /etc/slackware-version ]; then \
+		./build_tools/install_subst contrib/init.d/rc.slackware.asterisk  "$(DESTDIR)/etc/rc.d/rc.asterisk"; \
+	elif [ -f /etc/os-release ] && [ "slackware" = "$(shell . /etc/os-release 2>/dev/null && echo $$ID)" ] ; then \
+		./build_tools/install_subst contrib/init.d/rc.slackware.asterisk  "$(DESTDIR)/etc/rc.d/rc.asterisk"; \
 	elif [ -d "$(DESTDIR)/Library/LaunchDaemons" ]; then \
 		if [ ! -f "$(DESTDIR)/Library/LaunchDaemons/org.asterisk.asterisk.plist" ]; then \
 			./build_tools/install_subst contrib/init.d/org.asterisk.asterisk.plist "$(DESTDIR)/Library/LaunchDaemons/org.asterisk.asterisk.plist"; \
@@ -917,8 +971,6 @@ config:
 		if [ ! -f "$(DESTDIR)/Library/LaunchDaemons/org.asterisk.muted.plist" ]; then \
 			./build_tools/install_subst contrib/init.d/org.asterisk.muted.plist "$(DESTDIR)/Library/LaunchDaemons/org.asterisk.muted.plist"; \
 		fi; \
-	elif [ -f /etc/slackware-version ]; then \
-		echo "Slackware is not currently supported, although an init script does exist for it."; \
 	else \
 		echo "We could not install init scripts for your distribution." ; \
 	fi
@@ -955,8 +1007,10 @@ ifeq ($(HAVE_DAHDI),1)
 	rm -f $(DESTDIR)$(DAHDI_UDEV_HOOK_DIR)/40-asterisk
 endif
 	$(MAKE) -C sounds uninstall
-ifneq ($(LDCONFIG),)
-	$(LDCONFIG) || :
+ifeq ($(LDCONFIG),)
+else ifeq ($(LDCONFIG),:)
+else
+	$(LDCONFIG) "$(ASTLIBDIR)/" || :
 endif
 
 uninstall: _uninstall
@@ -1066,6 +1120,7 @@ check-alembic: makeopts
 	@find contrib/ast-db-manage/ -name '*.pyc' -delete
 	@ALEMBIC=$(ALEMBIC) build_tools/make_check_alembic config cdr voicemail >&2
 
+.PHONY: install-configs
 .PHONY: menuselect
 .PHONY: main
 .PHONY: sounds
@@ -1076,11 +1131,9 @@ check-alembic: makeopts
 .PHONY: _all
 .PHONY: full
 .PHONY: _full
-.PHONY: prereqs
 .PHONY: uninstall
 .PHONY: _uninstall
 .PHONY: uninstall-all
-.PHONY: dont-optimize
 .PHONY: badshell
 .PHONY: installdirs
 .PHONY: validate-docs
@@ -1098,3 +1151,5 @@ check-alembic: makeopts
 
 FORCE:
 
+# This only stops targets within the root Makefile from building in parallel.
+.NOTPARALLEL:
