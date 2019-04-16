@@ -349,8 +349,10 @@ struct stasis_topic_statistics {
 	int messages_not_dispatched;
 	/*! \brief The number of messages that were dispatched to at least 1 subscriber */
 	int messages_dispatched;
-	/*! \brief The number of subscribers to this topic */
-	int subscriber_count;
+	/*! \brief The ids of the subscribers to this topic */
+	struct ao2_container *subscribers;
+	/*! \brief Pointer to the topic (NOT refcounted, and must NOT be accessed) */
+	struct stasis_topic *topic;
 	/*! \brief Name of the topic */
 	char name[0];
 };
@@ -367,6 +369,9 @@ struct stasis_topic {
 #ifdef AST_DEVMODE
 	struct stasis_topic_statistics *statistics;
 #endif
+
+	/*! Unique incrementing integer for subscriber ids */
+	int subscriber_id;
 
 	/*! Name of the topic */
 	char name[0];
@@ -397,6 +402,7 @@ static void topic_dtor(void *obj)
 
 	AST_VECTOR_FREE(&topic->subscribers);
 	AST_VECTOR_FREE(&topic->upstream_topics);
+	ast_debug(1, "Topic '%s': %p destroyed\n", topic->name, topic);
 
 #ifdef AST_DEVMODE
 	if (topic->statistics) {
@@ -407,16 +413,31 @@ static void topic_dtor(void *obj)
 }
 
 #ifdef AST_DEVMODE
-static struct stasis_topic_statistics *stasis_topic_statistics_create(const char *name)
+static void topic_statistics_destroy(void *obj)
+{
+	struct stasis_topic_statistics *statistics = obj;
+
+	ao2_cleanup(statistics->subscribers);
+}
+
+static struct stasis_topic_statistics *stasis_topic_statistics_create(struct stasis_topic *topic)
 {
 	struct stasis_topic_statistics *statistics;
 
-	statistics = ao2_alloc(sizeof(*statistics) + strlen(name) + 1, NULL);
+	statistics = ao2_alloc(sizeof(*statistics) + strlen(topic->name) + 1, topic_statistics_destroy);
 	if (!statistics) {
 		return NULL;
 	}
 
-	strcpy(statistics->name, name); /* SAFE */
+	statistics->subscribers = ast_str_container_alloc(1);
+	if (!statistics->subscribers) {
+		ao2_ref(statistics, -1);
+		return NULL;
+	}
+
+	/* This is strictly used for the pointer address when showing the topic */
+	statistics->topic = topic;
+	strcpy(statistics->name, topic->name); /* SAFE */
 	ao2_link(topic_statistics, statistics);
 
 	return statistics;
@@ -436,8 +457,10 @@ struct stasis_topic *stasis_topic_create(const char *name)
 	strcpy(topic->name, name); /* SAFE */
 	res |= AST_VECTOR_INIT(&topic->subscribers, INITIAL_SUBSCRIBERS_MAX);
 	res |= AST_VECTOR_INIT(&topic->upstream_topics, 0);
+	ast_debug(1, "Topic '%s': %p created\n", topic->name, topic);
+
 #ifdef AST_DEVMODE
-	topic->statistics = stasis_topic_statistics_create(name);
+	topic->statistics = stasis_topic_statistics_create(topic);
 	if (!topic->name || !topic->statistics || res)
 #else
 	if (!topic->name || res)
@@ -466,8 +489,8 @@ struct stasis_subscription_statistics {
 	const char *file;
 	/*! \brief The function where the subscription originates */
 	const char *func;
-	/*! \brief Name of the topic we subscribed to */
-	char *topic;
+	/*! \brief Names of the topics we are subscribed to */
+	struct ao2_container *topics;
 	/*! \brief The message type that currently took the longest to process */
 	struct stasis_message_type *highest_time_message_type;
 	/*! \brief Highest time spent invoking a message */
@@ -484,6 +507,8 @@ struct stasis_subscription_statistics {
 	int uses_threadpool;
 	/*! \brief The line number where the subscription originates */
 	int lineno;
+	/*! \brief Pointer to the subscription (NOT refcounted, and must NOT be accessed) */
+	struct stasis_subscription *sub;
 	/*! \brief Unique ID of the subscription */
 	char uniqueid[0];
 };
@@ -492,7 +517,7 @@ struct stasis_subscription_statistics {
 /*! \internal */
 struct stasis_subscription {
 	/*! Unique ID for this subscription */
-	char uniqueid[AST_UUID_STR_LEN];
+	char *uniqueid;
 	/*! Topic subscribed to. */
 	struct stasis_topic *topic;
 	/*! Mailbox for processing incoming messages. */
@@ -535,6 +560,7 @@ static void subscription_dtor(void *obj)
 	 * be bad. */
 	ast_assert(stasis_subscription_is_done(sub));
 
+	ast_free(sub->uniqueid);
 	ao2_cleanup(sub->topic);
 	sub->topic = NULL;
 	ast_taskprocessor_unreference(sub->mailbox);
@@ -617,15 +643,27 @@ void stasis_subscription_cb_noop(void *data, struct stasis_subscription *sub, st
 }
 
 #ifdef AST_DEVMODE
-static struct stasis_subscription_statistics *stasis_subscription_statistics_create(const char *uniqueid,
-	const char *topic, int needs_mailbox, int use_thread_pool, const char *file, int lineno,
+static void subscription_statistics_destroy(void *obj)
+{
+	struct stasis_subscription_statistics *statistics = obj;
+
+	ao2_cleanup(statistics->topics);
+}
+
+static struct stasis_subscription_statistics *stasis_subscription_statistics_create(struct stasis_subscription *sub,
+	int needs_mailbox, int use_thread_pool, const char *file, int lineno,
 	const char *func)
 {
 	struct stasis_subscription_statistics *statistics;
-	size_t uniqueid_len = strlen(uniqueid) + 1;
 
-	statistics = ao2_alloc(sizeof(*statistics) + uniqueid_len + strlen(topic) + 1, NULL);
+	statistics = ao2_alloc(sizeof(*statistics) + strlen(sub->uniqueid) + 1, subscription_statistics_destroy);
 	if (!statistics) {
+		return NULL;
+	}
+
+	statistics->topics = ast_str_container_alloc(1);
+	if (!statistics->topics) {
+		ao2_ref(statistics, -1);
 		return NULL;
 	}
 
@@ -634,9 +672,8 @@ static struct stasis_subscription_statistics *stasis_subscription_statistics_cre
 	statistics->func = func;
 	statistics->uses_mailbox = needs_mailbox;
 	statistics->uses_threadpool = use_thread_pool;
-	strcpy(statistics->uniqueid, uniqueid); /* SAFE */
-	statistics->topic = statistics->uniqueid + uniqueid_len;
-	strcpy(statistics->topic, topic); /* SAFE */
+	strcpy(statistics->uniqueid, sub->uniqueid); /* SAFE */
+	statistics->sub = sub;
 	ao2_link(subscription_statistics, statistics);
 
 	return statistics;
@@ -654,6 +691,7 @@ struct stasis_subscription *internal_stasis_subscribe(
 	const char *func)
 {
 	struct stasis_subscription *sub;
+	int ret;
 
 	if (!topic) {
 		return NULL;
@@ -664,12 +702,17 @@ struct stasis_subscription *internal_stasis_subscribe(
 	if (!sub) {
 		return NULL;
 	}
-	ast_uuid_generate_str(sub->uniqueid, sizeof(sub->uniqueid));
 
 #ifdef AST_DEVMODE
-	sub->statistics = stasis_subscription_statistics_create(sub->uniqueid, topic->name, needs_mailbox,
-		use_thread_pool, file, lineno, func);
-	if (!sub->statistics) {
+	ret = ast_asprintf(&sub->uniqueid, "%s:%s-%d", file, stasis_topic_name(topic), ast_atomic_fetchadd_int(&topic->subscriber_id, +1));
+	sub->statistics = stasis_subscription_statistics_create(sub, needs_mailbox, use_thread_pool, file, lineno, func);
+	if (ret < 0 || !sub->statistics) {
+		ao2_ref(sub, -1);
+		return NULL;
+	}
+#else
+	ret = ast_asprintf(&sub->uniqueid, "%s-%d", stasis_topic_name(topic), ast_atomic_fetchadd_int(&topic->subscriber_id, +1));
+	if (ret < 0) {
 		ao2_ref(sub, -1);
 		return NULL;
 	}
@@ -679,7 +722,7 @@ struct stasis_subscription *internal_stasis_subscribe(
 		char tps_name[AST_TASKPROCESSOR_MAX_NAME + 1];
 
 		/* Create name with seq number appended. */
-		ast_taskprocessor_build_name(tps_name, sizeof(tps_name), "sub%c:%s",
+		ast_taskprocessor_build_name(tps_name, sizeof(tps_name), "stasis/%c:%s",
 			use_thread_pool ? 'p' : 'm',
 			stasis_topic_name(topic));
 
@@ -714,6 +757,7 @@ struct stasis_subscription *internal_stasis_subscribe(
 
 	if (topic_add_subscription(topic, sub) != 0) {
 		ao2_ref(sub, -1);
+		ao2_ref(topic, -1);
 
 		return NULL;
 	}
@@ -1000,7 +1044,8 @@ static int topic_add_subscription(struct stasis_topic *topic, struct stasis_subs
 	}
 
 #ifdef AST_DEVMODE
-	topic->statistics->subscriber_count += 1;
+	ast_str_container_add(topic->statistics->subscribers, stasis_subscription_uniqueid(sub));
+	ast_str_container_add(sub->statistics->topics, stasis_topic_name(topic));
 #endif
 
 	ao2_unlock(topic);
@@ -1023,7 +1068,8 @@ static int topic_remove_subscription(struct stasis_topic *topic, struct stasis_s
 
 #ifdef AST_DEVMODE
 	if (!res) {
-		topic->statistics->subscriber_count -= 1;
+		ast_str_container_remove(topic->statistics->subscribers, stasis_subscription_uniqueid(sub));
+		ast_str_container_remove(sub->statistics->topics, stasis_topic_name(topic));
 	}
 #endif
 
@@ -1487,6 +1533,7 @@ static void send_subscription_unsubscribe(struct stasis_topic *topic,
 struct topic_pool_entry {
 	struct stasis_forward *forward;
 	struct stasis_topic *topic;
+	char name[0];
 };
 
 static void topic_pool_entry_dtor(void *obj)
@@ -1498,10 +1545,19 @@ static void topic_pool_entry_dtor(void *obj)
 	entry->topic = NULL;
 }
 
-static struct topic_pool_entry *topic_pool_entry_alloc(void)
+static struct topic_pool_entry *topic_pool_entry_alloc(const char *topic_name)
 {
-	return ao2_alloc_options(sizeof(struct topic_pool_entry), topic_pool_entry_dtor,
-		AO2_ALLOC_OPT_LOCK_NOLOCK);
+	struct topic_pool_entry *topic_pool_entry;
+
+	topic_pool_entry = ao2_alloc_options(sizeof(*topic_pool_entry) + strlen(topic_name) + 1,
+		topic_pool_entry_dtor, AO2_ALLOC_OPT_LOCK_NOLOCK);
+	if (!topic_pool_entry) {
+		return NULL;
+	}
+
+	strcpy(topic_pool_entry->name, topic_name); /* Safe */
+
+	return topic_pool_entry;
 }
 
 struct stasis_topic_pool {
@@ -1539,7 +1595,7 @@ static int topic_pool_entry_hash(const void *obj, const int flags)
 		break;
 	case OBJ_SEARCH_OBJECT:
 		object = obj;
-		key = stasis_topic_name(object->topic);
+		key = object->name;
 		break;
 	default:
 		/* Hash can only work on something with a full key. */
@@ -1558,10 +1614,10 @@ static int topic_pool_entry_cmp(void *obj, void *arg, int flags)
 
 	switch (flags & OBJ_SEARCH_MASK) {
 	case OBJ_SEARCH_OBJECT:
-		right_key = stasis_topic_name(object_right->topic);
+		right_key = object_right->name;
 		/* Fall through */
 	case OBJ_SEARCH_KEY:
-		cmp = strcasecmp(stasis_topic_name(object_left->topic), right_key);
+		cmp = strcasecmp(object_left->name, right_key);
 		break;
 	case OBJ_SEARCH_PARTIAL_KEY:
 		/* Not supported by container */
@@ -1638,18 +1694,29 @@ struct stasis_topic *stasis_topic_pool_get_topic(struct stasis_topic_pool *pool,
 {
 	RAII_VAR(struct topic_pool_entry *, topic_pool_entry, NULL, ao2_cleanup);
 	SCOPED_AO2LOCK(topic_container_lock, pool->pool_container);
+	char *new_topic_name;
+	int ret;
 
 	topic_pool_entry = ao2_find(pool->pool_container, topic_name, OBJ_SEARCH_KEY | OBJ_NOLOCK);
 	if (topic_pool_entry) {
 		return topic_pool_entry->topic;
 	}
 
-	topic_pool_entry = topic_pool_entry_alloc();
+	topic_pool_entry = topic_pool_entry_alloc(topic_name);
 	if (!topic_pool_entry) {
 		return NULL;
 	}
 
-	topic_pool_entry->topic = stasis_topic_create(topic_name);
+	/* To provide further detail and to ensure that the topic is unique within the scope of the
+	 * system we prefix it with the pooling topic name, which should itself already be unique.
+	 */
+	ret = ast_asprintf(&new_topic_name, "%s/%s", stasis_topic_name(pool->pool_topic), topic_name);
+	if (ret < 0) {
+		return NULL;
+	}
+
+	topic_pool_entry->topic = stasis_topic_create(new_topic_name);
+	ast_free(new_topic_name);
 	if (!topic_pool_entry->topic) {
 		return NULL;
 	}
@@ -2071,12 +2138,15 @@ STASIS_MESSAGE_TYPE_DEFN(ast_multi_user_event_type,
 
 #ifdef AST_DEVMODE
 
+AO2_STRING_FIELD_SORT_FN(stasis_subscription_statistics, uniqueid);
+
 /*!
  * \internal
  * \brief CLI command implementation for 'stasis statistics show subscriptions'
  */
 static char *statistics_show_subscriptions(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a)
 {
+	struct ao2_container *sorted_subscriptions;
 	struct ao2_iterator iter;
 	struct stasis_subscription_statistics *statistics;
 	int count = 0;
@@ -2101,9 +2171,22 @@ static char *statistics_show_subscriptions(struct ast_cli_entry *e, int cmd, str
 		return CLI_SHOWUSAGE;
 	}
 
+	sorted_subscriptions = ao2_container_alloc_rbtree(AO2_ALLOC_OPT_LOCK_NOLOCK, 0,
+		stasis_subscription_statistics_sort_fn, NULL);
+	if (!sorted_subscriptions) {
+		ast_cli(a->fd, "Could not create container for sorting subscription statistics\n");
+		return CLI_SUCCESS;
+	}
+
+	if (ao2_container_dup(sorted_subscriptions, subscription_statistics, 0)) {
+		ao2_ref(sorted_subscriptions, -1);
+		ast_cli(a->fd, "Could not sort subscription statistics\n");
+		return CLI_SUCCESS;
+	}
+
 	ast_cli(a->fd, "\n" FMT_HEADERS, "Subscription", "Dropped", "Passed", "Lowest Invoke", "Highest Invoke");
 
-	iter = ao2_iterator_init(subscription_statistics, 0);
+	iter = ao2_iterator_init(sorted_subscriptions, 0);
 	while ((statistics = ao2_iterator_next(&iter))) {
 		ast_cli(a->fd, FMT_FIELDS, statistics->uniqueid, statistics->messages_dropped, statistics->messages_passed,
 			statistics->lowest_time_invoked, statistics->highest_time_invoked);
@@ -2113,6 +2196,8 @@ static char *statistics_show_subscriptions(struct ast_cli_entry *e, int cmd, str
 		++count;
 	}
 	ao2_iterator_destroy(&iter);
+
+	ao2_ref(sorted_subscriptions, -1);
 
 	ast_cli(a->fd, FMT_FIELDS2, "Total", dropped, passed);
 	ast_cli(a->fd, "\n%d subscriptions\n\n", count);
@@ -2158,6 +2243,8 @@ static char *subscription_statistics_complete_name(const char *word, int state)
 static char *statistics_show_subscription(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a)
 {
 	struct stasis_subscription_statistics *statistics;
+	struct ao2_iterator i;
+	char *name;
 
 	switch (cmd) {
 	case CLI_INIT:
@@ -2185,7 +2272,7 @@ static char *statistics_show_subscription(struct ast_cli_entry *e, int cmd, stru
 	}
 
 	ast_cli(a->fd, "Subscription: %s\n", statistics->uniqueid);
-	ast_cli(a->fd, "Topic: %s\n", statistics->topic);
+	ast_cli(a->fd, "Pointer Address: %p\n", statistics->sub);
 	ast_cli(a->fd, "Source filename: %s\n", S_OR(statistics->file, "<unavailable>"));
 	ast_cli(a->fd, "Source line number: %d\n", statistics->lineno);
 	ast_cli(a->fd, "Source function: %s\n", S_OR(statistics->func, "<unavailable>"));
@@ -2202,10 +2289,22 @@ static char *statistics_show_subscription(struct ast_cli_entry *e, int cmd, stru
 	}
 	ao2_unlock(statistics);
 
+	ast_cli(a->fd, "Number of topics: %d\n", ao2_container_count(statistics->topics));
+
+	ast_cli(a->fd, "Subscribed topics:\n");
+	i = ao2_iterator_init(statistics->topics, 0);
+	while ((name = ao2_iterator_next(&i))) {
+		ast_cli(a->fd, "\t%s\n", name);
+		ao2_ref(name, -1);
+	}
+	ao2_iterator_destroy(&i);
+
 	ao2_ref(statistics, -1);
 
 	return CLI_SUCCESS;
 }
+
+AO2_STRING_FIELD_SORT_FN(stasis_topic_statistics, name);
 
 /*!
  * \internal
@@ -2213,14 +2312,15 @@ static char *statistics_show_subscription(struct ast_cli_entry *e, int cmd, stru
  */
 static char *statistics_show_topics(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a)
 {
+	struct ao2_container *sorted_topics;
 	struct ao2_iterator iter;
 	struct stasis_topic_statistics *statistics;
 	int count = 0;
 	int not_dispatched = 0;
 	int dispatched = 0;
-#define FMT_HEADERS		"%-64s %10s %10s %16s %16s\n"
-#define FMT_FIELDS		"%-64s %10d %10d %16ld %16ld\n"
-#define FMT_FIELDS2		"%-64s %10d %10d\n"
+#define FMT_HEADERS		"%-64s %10s %10s %10s %16s %16s\n"
+#define FMT_FIELDS		"%-64s %10d %10d %10d %16ld %16ld\n"
+#define FMT_FIELDS2		"%-64s %10s %10d %10d\n"
 
 	switch (cmd) {
 	case CLI_INIT:
@@ -2237,11 +2337,25 @@ static char *statistics_show_topics(struct ast_cli_entry *e, int cmd, struct ast
 		return CLI_SHOWUSAGE;
 	}
 
-	ast_cli(a->fd, "\n" FMT_HEADERS, "Topic", "Dropped", "Dispatched", "Lowest Dispatch", "Highest Dispatch");
+	sorted_topics = ao2_container_alloc_rbtree(AO2_ALLOC_OPT_LOCK_NOLOCK, 0,
+		stasis_topic_statistics_sort_fn, NULL);
+	if (!sorted_topics) {
+		ast_cli(a->fd, "Could not create container for sorting topic statistics\n");
+		return CLI_SUCCESS;
+	}
 
-	iter = ao2_iterator_init(topic_statistics, 0);
+	if (ao2_container_dup(sorted_topics, topic_statistics, 0)) {
+		ao2_ref(sorted_topics, -1);
+		ast_cli(a->fd, "Could not sort topic statistics\n");
+		return CLI_SUCCESS;
+	}
+
+	ast_cli(a->fd, "\n" FMT_HEADERS, "Topic", "Subscribers", "Dropped", "Dispatched", "Lowest Dispatch", "Highest Dispatch");
+
+	iter = ao2_iterator_init(sorted_topics, 0);
 	while ((statistics = ao2_iterator_next(&iter))) {
-		ast_cli(a->fd, FMT_FIELDS, statistics->name, statistics->messages_not_dispatched, statistics->messages_dispatched,
+		ast_cli(a->fd, FMT_FIELDS, statistics->name, ao2_container_count(statistics->subscribers),
+			statistics->messages_not_dispatched, statistics->messages_dispatched,
 			statistics->lowest_time_dispatched, statistics->highest_time_dispatched);
 		not_dispatched += statistics->messages_not_dispatched;
 		dispatched += statistics->messages_dispatched;
@@ -2250,7 +2364,9 @@ static char *statistics_show_topics(struct ast_cli_entry *e, int cmd, struct ast
 	}
 	ao2_iterator_destroy(&iter);
 
-	ast_cli(a->fd, FMT_FIELDS2, "Total", not_dispatched, dispatched);
+	ao2_ref(sorted_topics, -1);
+
+	ast_cli(a->fd, FMT_FIELDS2, "Total", "", not_dispatched, dispatched);
 	ast_cli(a->fd, "\n%d topics\n\n", count);
 
 #undef FMT_HEADERS
@@ -2294,6 +2410,8 @@ static char *topic_statistics_complete_name(const char *word, int state)
 static char *statistics_show_topic(struct ast_cli_entry *e, int cmd, struct ast_cli_args *a)
 {
 	struct stasis_topic_statistics *statistics;
+	struct ao2_iterator i;
+	char *uniqueid;
 
 	switch (cmd) {
 	case CLI_INIT:
@@ -2321,11 +2439,20 @@ static char *statistics_show_topic(struct ast_cli_entry *e, int cmd, struct ast_
 	}
 
 	ast_cli(a->fd, "Topic: %s\n", statistics->name);
+	ast_cli(a->fd, "Pointer Address: %p\n", statistics->topic);
 	ast_cli(a->fd, "Number of messages published that went to no subscriber: %d\n", statistics->messages_not_dispatched);
 	ast_cli(a->fd, "Number of messages that went to at least one subscriber: %d\n", statistics->messages_dispatched);
 	ast_cli(a->fd, "Lowest amount of time (in milliseconds) spent dispatching message: %ld\n", statistics->lowest_time_dispatched);
 	ast_cli(a->fd, "Highest amount of time (in milliseconds) spent dispatching messages: %ld\n", statistics->highest_time_dispatched);
-	ast_cli(a->fd, "Number of subscribers: %d\n", statistics->subscriber_count);
+	ast_cli(a->fd, "Number of subscribers: %d\n", ao2_container_count(statistics->subscribers));
+
+	ast_cli(a->fd, "Subscribers:\n");
+	i = ao2_iterator_init(statistics->subscribers, 0);
+	while ((uniqueid = ao2_iterator_next(&i))) {
+		ast_cli(a->fd, "\t%s\n", uniqueid);
+		ao2_ref(uniqueid, -1);
+	}
+	ao2_iterator_destroy(&i);
 
 	ao2_ref(statistics, -1);
 
@@ -2595,7 +2722,7 @@ int stasis_init(void)
 	threadpool_opts.auto_increment = 1;
 	threadpool_opts.max_size = cfg->threadpool_options->max_size;
 	threadpool_opts.idle_timeout = cfg->threadpool_options->idle_timeout_sec;
-	pool = ast_threadpool_create("stasis-core", NULL, &threadpool_opts);
+	pool = ast_threadpool_create("stasis", NULL, &threadpool_opts);
 	ao2_ref(cfg, -1);
 	if (!pool) {
 		ast_log(LOG_ERROR, "Failed to create 'stasis-core' threadpool\n");

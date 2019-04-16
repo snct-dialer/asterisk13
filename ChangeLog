@@ -1,12 +1,850 @@
-2019-02-15 16:26 +0000  Asterisk Development Team <asteriskteam@digium.com>
+2019-04-04 14:46 +0000  Asterisk Development Team <asteriskteam@digium.com>
 
-	* asterisk 13.25.0 Released.
+	* asterisk 13.26.0 Released.
 
-2019-02-13 17:47 +0000  Asterisk Development Team <asteriskteam@digium.com>
+2019-04-01 14:42 +0000  Asterisk Development Team <asteriskteam@digium.com>
 
-	* asterisk 13.25.0-rc3 Released.
+	* asterisk 13.26.0-rc1 Released.
 
-2019-02-13 07:36 +0000 [13b58ce3ea]  Paulo Vicentini <paulo.vicentini@gmail.com>
+2019-03-26 14:56 +0000 [4de27f332d]  Ben Ford <bford@digium.com>
+
+	* alembic: Fix errors during upgrade head.
+
+	  When trying to upgrade using alembic, a couple different errors kept
+	  popping up that prevented the upgrade. An additional parameter was
+	  needed when changing the schema for mwi_subscribe_replaces_unsolicited
+	  from an integer to an enum. When changing from a string to an enum, the
+	  type needed to be cast for postgresql. The other issue was a parameter
+	  being used during column creation that did not exist.
+
+	  After fixing the upgrade process, it revealed errors with the downgrade
+	  process. One was a variable not being defined in the downgrade function,
+	  and the other was tables not existing when using MySQL. This was due to
+	  a context check that should have encompassed MySQL, but in the end was
+	  not doing so.
+
+	  Change-Id: Ib4d70cf3ce5080023a50be496272a777b55d6c8e
+
+2019-03-27 11:03 +0000 [90c1653997]  Ben Ford <bford@digium.com>
+
+	* build: Add staging directories for future changes.
+
+	  This is the first step in changing the release process so that changes
+	  made to the CHANGES and UPGRADE.txt files do not result in merge
+	  conflicts every time multiple people modify these files. The changes
+	  made will go in these new directories: doc/CHANGES-staging and
+	  doc/UPGRADE-staging. The README.md files explain how things will work,
+	  but here's a little overview. When you make a change that would go in
+	  either CHANGES or UPGRADE.txt, this should instead be documented in a
+	  new file in the doc/CHANGES-staging or doc/UPGRADE-staging directory,
+	  respectively. The format will look like this:
+
+	     Subject: res_pjsip
+
+	     A description that explains the changes made and why. The release
+	     script will handle the bulleting and section separators! The
+	     'Subject:' header is case-sensitive.
+
+	     You can still separate with new lines within your description.
+
+	     Subject: res_ari
+	     Master-Only: true
+
+	     You can have more than one subject, and they don't have to be the
+	     same! Also, the 'Master-Only' header should always be true and is
+	     also case-sensitive (but the value is not - you can have 'true' or
+	     'True'). This header will only ever be present in the master branch.
+
+	  For more information, check out the wiki page:
+	  https://wiki.asterisk.org/wiki/display/AST/CHANGES+and+UPGRADE.txt
+
+	  This is an initial change for ASTERISK_28111. Functionally, this will
+	  make no difference, but it will prep the directories for when the
+	  changes from CHANGES and UPGRADE.txt are extracted.
+
+	  Change-Id: I8d852f284f66ac456b26dcb899ee46babf7d15b6
+
+2019-03-25 18:05 +0000 [6e20e071a9]  Alexei Gradinari <alex2grad@gmail.com>
+
+	* pjsip: restrict function PJSIP_PARSE_URI to parse only SIP/SIPS URIs
+
+	  The next usage of PJSIP_PARSE_URI will crash asterisk
+	  ${PJSIP_PARSE_URI(tel:+1234567890,host)}
+	  or
+	  ${PJSIP_PARSE_URI(192.168.1.1:5060,host)}
+
+	  The function pjsip_parse_uri successfully parses then, but returns
+	  struct pjsip_other_uri *.
+
+	  This patch restricts parsing only SIP/SIPS URIs.
+
+	  Change-Id: I16f255c2b86a80a67e9f9604b94b129a381dd25e
+
+2019-03-26 16:55 +0000 [4a6bd68869]  Sean Bright <sean.bright@gmail.com>
+
+	* app_queue: Fix documentation for QUEUE_MEMBER function.
+
+	  It was a copy/paste of the QUEUE_MEMBER_COUNT function's synopsis.
+
+	  ASTERISK-20986 #close
+	  Reported by: Olivier Krief
+
+	  Change-Id: If51ec481feb35824a4e78ab5600b197b819b10be
+
+2019-03-25 06:34 +0000 [03708f435c]  Joshua Colp <jcolp@digium.com>
+
+	* manager: Use separate lock for session event notification.
+
+	  When notifying a manager session that new events were available
+	  the same lock was used that was also held when doing things within
+	  the session (such as sending events out). If the manager session
+	  blocked for a period of time this would cause a back up of messages
+	  in Stasis and would also block any other sessions from receiving
+	  events.
+
+	  This change adds a separate lock to the manager session which is
+	  strictly used for notifying it that new events are available.
+
+	  ASTERISK-28350
+
+	  Change-Id: Ifbcac007faca9ad0231640f5e82a6ca9228f261b
+
+2019-03-06 16:21 +0000 [04d1bc3df0]  sungtae kim <sungtae@messagebird.com>
+
+	* res/res_ari: Added timestamp as a requirement for all ARI events
+
+	  Changed to requirement to having timestamp for all of ARI events.
+	  The below ARI events were changed to having timestamp.
+	  PlaybackStarted, PlaybackContinuing, PlaybackFinished,
+	  RecordingStarted, RecordingFinished, RecordingFailed,
+	  ApplicationReplaced, ApplicationMoveFailed
+
+	  ASTERISK-28326
+
+	  Change-Id: I382c2fef58f5fe107e1074869a6d05310accb41f
+
+2019-03-25 14:31 +0000 [53aa750839]  Sean Bright <sean.bright@gmail.com>
+
+	* chan_sip: Ensure 'qualifygap' isn't negative
+
+	  Passing negative intervals to the scheduler rips a hole in the
+	  space-time continuum.
+
+	  ASTERISK-25792 #close
+	  Reported by: Paul Sandys
+
+	  Change-Id: Ie706f21cee05f76ffb6f7d89e9c867930ee7bcd7
+
+2019-03-25 11:42 +0000 [3b1cf67fa9]  Alexei Gradinari <alex2grad@gmail.com>
+
+	* res_config_odbc: set empty extended field as a single whitespace
+
+	  If Realtime @ variable value is NULL or empty or contains only whitespaces
+	  then when we try to retrieve it using PJSIP_ENDPOINT we get WARNING
+	  pjsip_endpoint_function_read: Unknown property @my_var for PJSIP endpoint.
+	  And the variable is missing in the result of CLI pjsip show endpoint.
+
+	  This patch keeps empty sorcery extended field.
+
+	  ASTERISK-28341 #close
+
+	  Change-Id: I221fccc04cbfa2be17ce971f64ae0e74e465eea0
+
+2019-03-22 14:46 +0000 [4315634bc9]  Matthew Fredrickson <creslin@digium.com>
+
+	* main/taskprocessor: Increase max name length of taskprocessors
+
+	  Since the new names went in, the maximum taskprocessor name is too
+	  short.  This patch increases the name field to a length to better
+	  handle the new names.
+
+	  Change-Id: I32f32d6926f25c8ef5a91303fd2988d2c2858877
+
+2019-03-14 11:46 +0000 [69b194c837]  George Joseph <gjoseph@digium.com>
+
+	* sorcery.c: Sorcery enhancements for wizard management
+
+	  Added ability to specifiy a wizard is read-only when applying
+	  it to a specific object type.  This allows you to specify
+	  create, update and delete callbacks for the wizard but limit
+	  which object types can use them.
+
+	  Added the ability to allow an object type to have multiple
+	  wizards of the same type.  This is indicated when a wizard
+	  is added to a specific object type.
+
+	  Added 3 new sorcery wizard functions:
+
+	  * ast_sorcery_object_type_insert_wizard which does the same thing
+	    as the existing ast_sorcery_insert_wizard_mapping function but
+	    accepts the new read-only and allot-duplicates flags and also
+	    returns the ast_sorcery_wizard structure used and it's internal
+	    data structure. This allows immediate use of the wizard's
+	    callbacks without having to register a "wizard mapped" observer.
+
+	  * ast_sorcery_object_type_apply_wizard which does the same
+	    thing as the existing ast_sorcery_apply_wizard_mapping function
+	    but has the added capabilities of
+	    ast_sorcery_object_type_insert_wizard.
+
+	  * ast_sorcery_object_type_remove_wizard which removes a wizard
+	    matching both its name and its original argument string.
+
+	  * The original logic in __ast_sorcery_insert_wizard_mapping was moved
+	    to __ast_sorcery_object_type_insert_wizard and enhanced for the
+	    new capabilities, then __ast_sorcery_insert_wizard_mapping was
+	    refactored to just call __ast_sorcery_insert_wizard_mapping.
+
+	  * Added a unit test to test_sorcery.c to test the read-only
+	    capability.
+
+	  Change-Id: I40f35840252e4313d99e11dbd80e270a3aa10605
+
+2019-03-10 17:53 +0000 [dc94a3180e]  sungtae kim <sungtae@messagebird.com>
+
+	* res/res_stasis: Fixed wrong StasisEnd timestamp
+
+	  Because StasisEnd's timestamp created it's own timestamp, it makes
+	  wrong timestamp, compare to other channel event(ChannelDestroyed).
+	  Fixed to getting a timestamp from the Channel's timestamp.
+
+	  ASTERISK-28333
+
+	  Change-Id: I5eb8380fc472f1100535a6bc4983c64767026116
+
+2019-03-14 09:55 +0000 [cc954977eb]  Sean Bright <sean.bright@gmail.com>
+
+	* vector: Add AST_VECTOR_COMPACT() to reclaim wasted space
+
+	  This might be useful in situations where you are loading an undetermined number
+	  of items into a vector and don't want to keep (potentially) 2x the necessary
+	  memory around indefinitely.
+
+	  Change-Id: I9711daa0fe01783fc6f04c5710eba84f2676d7b9
+
+2019-03-14 11:53 +0000 [f4bb80ba85]  Richard Mudgett <rmudgett@digium.com>
+
+	* taskprocessor.c: Fix printf type mismatch
+
+	  A size_t is not always an unsigned long.
+
+	  * Use the %zu format specifier in the ast_cli() printf format string since
+	  AST_VECTOR_SIZE() returns a size_t value.
+
+	  Change-Id: Ib102dd36bbe6c2a7a4ce6870ae9110d978dd7e98
+
+2019-03-08 09:40 +0000 [c87158f2da]  George Joseph <gjoseph@digium.com>
+
+	* app.c:  Remove deletion of pool topic on mwi state delete
+
+	  As part of an earlier voicemail refactor, ast_delete_mwi_state_full
+	  was modified to remove the pool topic for a mailbox when the state
+	  was deleted.  This was an attempt to prevent stale topics from
+	  accumulating when app_voicemail was reloaded and a mailbox went
+	  away.  Unfortunately because of the fact that when app_voicemail
+	  reloads, ALL mailboxes are deleted then only current ones recreated,
+	  topics were being removed from the pool that still had subscribers
+	  on them, then recreated as new topics of the same name.  So now
+	  modules like res_pjsip_mwi are listening on a topic that will
+	  never receive any messages because app_voicemail is publishing on
+	  a different topic that happens to have the same name.  The solutiuon
+	  to this is not easy and given that accumulating topics for
+	  deleted mailboxes is less evil that not sending NOTIFYs...
+
+	  * Removed the call to stasis_topic_pool_delete_topic in
+	    ast_delete_mwi_state_full.
+
+	  Also:
+
+	  * Fixed a topic reference leak in res_pjsip_mwi
+	    mwi_stasis_subscription_alloc.
+
+	  * Added some debugging to mwi_stasis_subscription_alloc,
+	    stasis_topic_create, and topic_dtor.
+
+	  * Fixed a topic reference leak in an error path in
+	    internal_stasis_subscribe.
+
+	  ASTERISK-28306
+	  Reported-by: Jared Hull
+
+	  Change-Id: Id7da0990b3ac4be4b58491536b35f41291247b27
+
+2019-03-13 06:05 +0000 [f0254cc1e9]  Joshua Colp <jcolp@digium.com>
+
+	* stasis: Allow empty application arguments to move.
+
+	  Change-Id: I1e4d37415f3034abe36496dc30209c2303e6af5c
+
+2019-03-06 07:20 +0000 [92d1889813]  Dömsödi Gergely <doome@uhusystems.com>
+
+	* app_queue: fix ring_entry to access nativeformats with a channel lock
+
+	  Fixes an intermittent segmentation fault which occured when accessing
+	  nativeformats of a channel which entered into a queue.
+
+	  ASTERISK-27964
+	  Reported by: Francisco Seratti
+
+	  Change-Id: Ic87fa7a363f3b487c24ce07032f4b2201c22db9e
+
+2019-03-12 15:38 +0000 [a96729c1cd]  Kevin Harwell <kharwell@digium.com>
+
+	* AMI/ARI: Bump non-breaking version numbers
+
+	  Increasing the non-breaking AMI and ARI version numbers due to changes and
+	  additions in those API's. Note, some changes may be forthcoming (will be added
+	  between now and the next release of Asterisk), thus not listed here. As well
+	  a few changes listed below may have been released in a previous release of
+	  Asterisk, but the API version numbers were not increased at that time, so
+	  including here.
+
+	  AMI:
+
+	   * res_pjsip: option for ContactStatus event updates - 4a8564c
+
+	  ARI:
+
+	   * bridging: Add creation timestamps - 4dd4dbd
+	   * res_stasis: Add ability to switch applications - 65170ba
+	   * ARI event type filtering - da93d17
+	   * Added ARI resource /ari/asterisk/ping - 67d587f
+
+	  ASTERISK-28314
+
+	  Change-Id: I96951b19c27c196e410b09fe82b00c8ca328cccc
+
+2019-03-12 13:25 +0000 [ee75df6ec9]  George Joseph <gjoseph@digium.com>
+
+	* Makefile.moddir_rules: Pass PJPROJECT_BUNDLED to download_externals
+
+	  The download_externals script wasn't getting the PJPROJECT_BUNDLED
+	  environment variable passed down to it so it wasn't downloading
+	  the appropriate variant of res_digium_phone.  This could cause
+	  crashes in the DPMA.
+
+	  Change-Id: I5daa9369c7af1fd556d892e89a85f279a2533425
+
+2019-03-07 13:48 +0000 [29d2d22e82]  Chris-Savinovich <csavinovich@digium.com>
+
+	* partial-inlining: disable partial-inlining if gcc>=8.2.1
+
+	  Apply flag -fno-partial-inlining on default optimization if and only if
+	  gcc version >= 8.2.1 (this is the current ver on Fedora and Ubuntu).
+	  This is done to avoid a bug that causes arithmetic calculations to fail
+	  if the following conditions are met:
+	  1. TEST_FRAMEWORK on
+	  2. DONT_OPTIMIZE off
+	  3. Fedora and Ubuntu
+	  4. GCC 8.2.1
+	  5. There must exist a certain combination of multithreading.
+	  6. Optimization level -O2 and -O3
+	  7. Flag -fpartial-inline activated (default when optimization level>=2)
+	  The following link points to a similar gcc bug reported in 2015. This leads me
+	  to believe the bug has regressed. Note I am not able to replicate this bug
+	  in an environment other than Asterisk + Test Framework + Test_cel because the
+	  multithreading combination that causes it seems to be unique. Therefore I
+	  am temporarily abandoning any thoughts of reporting the new occurrence of this
+	  bug to gcc.gnu.org.  https://gcc.gnu.org/bugzilla/show_bug.cgi?id=65307
+
+	  Change-Id: Ibd1afe60e0a38b88e85fdcd9b051004601c2f102
+
+2019-03-07 06:28 +0000 [07b3253155]  Joshua Colp <jcolp@digium.com>
+
+	* stasis: Improve topic/subscription names and statistics.
+
+	  Topic names now follow: <subsystem>:<functionality>[/<object>]
+
+	  This ensures that they are all unique, and also provides better
+	  insight in to what each topic is for.
+
+	  Subscriber ids now also use the main topic name they are
+	  subscribed to and an incrementing integer as their identifier to
+	  make it easier to understand what the subscription is primarily
+	  responsible for.
+
+	  Both the CLI commands for listing topic and subscription statistics
+	  now sort to make it a bit easier to see what is going on.
+
+	  Subscriptions will now show all topics that they are receiving messages
+	  from, not just the main topic they were subscribed to.
+
+	  ASTERISK-28335
+
+	  Change-Id: I484e971a38c3640f2bd156282e532eed84bf220d
+
+2019-03-03 09:20 +0000 [4bdf24a689]  sungtae kim <sungtae@messagebird.com>
+
+	* res/res_rtp_asterisk.c: Fixing possible divide by zero
+
+	  Currently, when the Asterisk calculates rtp statistics, it uses
+	  sample_count as a unsigned integer parameter. This would be fine
+	  for most of cases, but in case of large enough number of sample_count,
+	  this might be causing the divide by zero error.
+
+	  ASTERISK-28321
+
+	  Change-Id: If7e0629abaceddd2166eb012456c53033ea26249
+
+2019-03-09 08:39 +0000 [68d2304621]  cirillor <cirillor@lbv.org.br>
+
+	* Variable ALTCONF ignored when service is used in Debian
+
+	  When variable ALTCONF is defined, the command start prints the message
+	  "Unable to open specified master config file '"/etc/asterisk/asteris..."
+	  and use default configurations.
+
+	  ASTERISK-28332
+
+	  Change-Id: I7595e582a0ee2c1051ea35435e247e27906957ef
+
+2019-03-04 01:50 +0000 [cbc704c5ec]  Torrey Searle <torrey@voxbone.com>
+
+	* chan_pjsip: add a flag to ignore 183 responses if no SDP present
+
+	  chan_sip will always ignore 183 responses that do not contain SDP
+	  however, chan_pjsip will currently always translate it into a
+	  183 with SDP.  This new flag allows chan_pjsip to have the same
+	  behavior as chan_sip.
+
+	  ASTERISK-28322 #close
+
+	  Change-Id: If81cfaa17c11b6ac703e3d71696f259d86c6be4a
+
+2019-03-07 17:15 +0000 [b4bba8f217]  Sean Bright <sean.bright@gmail.com>
+
+	* app_meetme: Don't mute joining admins if conference is muted
+
+	  ASTERISK-28328 #close
+
+	  Change-Id: I4f6069fb34923b7521520c2a205a1e56227e592b
+
+2019-03-06 15:04 +0000 [1cb6466268]  Sean Bright <sean.bright@gmail.com>
+
+	* Replace calls to strtok() with strtok_r()
+
+	  strtok() uses a static buffer, making it not thread safe.
+
+	  Change-Id: Icce265153e1e65adafa8849334438ab6d190e541
+
+2019-03-07 16:05 +0000 [9a4027ad41]  Sean Bright <sean.bright@gmail.com>
+
+	* samples: Fix comment typo in pjsip.conf.sample
+
+	  Change-Id: I84a45c3d9fd26ca61aca99927eec83b57f1de857
+
+2019-02-28 12:03 +0000 [65170ba8f0]  Ben Ford <bford@digium.com>
+
+	* res_stasis: Add ability to switch applications.
+
+	  Added the ability to move between Stasis applications within Stasis.
+	  This can be done by calling 'move' in an application, providing (at
+	  minimum) the channel's id and the application to switch to. If the
+	  application is not registered or active, nothing will happen and the
+	  channel will remain in the current application, and an event will be
+	  triggered to let the application know that the move failed. The event
+	  name is "ApplicationMoveFailed", and provides the "destination" that the
+	  channel was attempting to move to, as well as the usual channel
+	  information. Optionally, a list of arguments can be passed to the
+	  function call for the receiving application. A full example of a 'move'
+	  call would look like this:
+
+	  client.channels.move(channelId, app, appArgs)
+
+	  The control object used to control the channel in Stasis can now switch
+	  which application it belongs to, rather than belonging to one Stasis
+	  application for its lifetime. This allows us to use the same control
+	  object instead of having to tear down the current one and create
+	  another.
+
+	  ASTERISK-28267 #close
+
+	  Change-Id: I43d12b10045a98a8d42541889b85695be26f288a
+
+2019-03-05 08:15 +0000 [5065f31fca]  cirillor <cirillor@lbv.org.br>
+
+	* chan_dahdi: Add logical group at DAHDIChannel event and CHANNEL function
+
+	  Add logical group at DAHDIChannel event
+	  and create "dahdi_group" at CHANNEL function.
+
+	  ASTERISK-28317
+
+	  Change-Id: Ic1f834cd53982a9707a9748395ee746d6575086a
+
+2019-03-04 16:05 +0000 [cb6a976656]  Sean Bright <sean.bright@gmail.com>
+
+	* app_queue: Handle empty 'interface' in queue member config
+
+	  While the 'interface' column is a NOT NULL, the empty string is still
+	  allowed. res_config_odbc treats the empty string as a NULL and we crash
+	  when trying to dereference.
+
+	  Also cleaned up an adjacent error message for consistency.
+
+	  ASTERISK-28168 #close
+
+	  Change-Id: I55e012b540fbcda99bb40bede3099b7ae5db8202
+
+2019-03-04 12:36 +0000 [7bcbc0bdfd]  Sean Bright <sean.bright@gmail.com>
+
+	* sip_to_pjsip: Make multiline comment parsing consistent with Asterisk
+
+	  In Asterisk configuration, a multiline comment starts with ;-- as long as it is
+	  not followed by another dash (i.e. ;--- is not a multiline comment).
+
+	  ASTERISK-28323 #close
+
+	  Change-Id: I32dc38e0fac01d3c0805d27d35d2365a7c37ca72
+
+2019-02-28 06:24 +0000 [1f3d6e1ebf]  Joshua Colp <jcolp@digium.com>
+
+	* basic-pbx: Update configuration to work with current modules.
+
+	  The res_pjsip_websocket module requires the res_http_websocket
+	  module so ensure it is loaded. As well the res_pjsip_notify
+	  module needs the pjsip_notify.conf configuration file so
+	  ensure it is installed.
+
+	  ASTERISK-28272
+
+	  Change-Id: I261659b84e7a6ac4cb49990d9badb4b2ad01bacd
+
+2019-02-08 15:32 +0000 [4dd4dbddbb]  sungtae kim <sungtae@messagebird.com>
+
+	* bridging: Add creation timestamps
+
+	  This small feature will help to checking the bridge's status to
+	  figure out which bridge is in old/zombie or not. Also added
+	  detail items for the 'bridge show *' cli to provide more detail
+	  info. And added creation item to the ARI as well.
+
+	  ASTERISK-28279
+
+	  Change-Id: I460238c488eca4d216b9176576211cb03286e040
+
+2019-02-28 10:01 +0000 [5821090661]  Sean Bright <sean.bright@gmail.com>
+
+	* res_pjsip_diversion: Use static pj_str_t for Diversion header names
+
+	  PJSIP assumes that these header names are not allocated, and does not
+	  clone the name strings when reusing headers.
+
+	  Block unload of res_pjsip_diversion until shutdown to ensure static
+	  memory stays valid.
+
+	  ASTERISK-28312 #close
+
+	  Change-Id: Ibd6ea55ec4a604bbd43ac07f8d0b54da2c39b8b9
+
+2019-02-28 15:36 +0000 [aa8ab603b0]  Sean Bright <sean.bright@gmail.com>
+
+	* menuselect: Add license header to menuselect_gtk.c
+
+	  This file was added to the Subversion repository on 2007-03-15 by
+	  Russell Bryant, a Digium employee at the time.
+
+	  ASTERISK-24173 #close
+
+	  Change-Id: Ie866fa9d31d550467613d362b35b03c031ee594d
+
+2019-02-27 19:09 +0000 [c38c8db14a]  Sean Bright <sean.bright@gmail.com>
+
+	* res_config_odbc: Avoid deadlock when max_connections = 1
+
+	  Rather than calling ast_odbc_find_table() in the prepare callback, call
+	  it beforehand and pass it in to the callback to avoid the need for a
+	  second connection.
+
+	  ASTERISK-28166 #close
+
+	  Change-Id: I6f8a0b9990d636fd6bc1a92ed70f7050d2436202
+
+2019-02-28 06:51 +0000 [1b3a489204]  Sean Bright <sean.bright@gmail.com>
+
+	* Revert "pjsip_message_filter: Only do interface lookup for wildcard addresses."
+
+	  This reverts commit d524ad523d0d32babba309810b5bccd09cb7f467.
+
+	  Reason for revert: This causes Contact and Via headers to have the wrong
+	  transport address.
+
+	  ASTERISK-28309 #close
+
+	  Change-Id: Ibba4d6176f68e39279fcd9a545f81d56e747bed8
+
+2019-02-28 05:28 +0000 [2f4a15101b]  Joshua Colp <jcolp@digium.com>
+
+	* Revert "http.c: Support separated HTTP request"
+
+	  This reverts commit 148ddfba9afc83b102fadabecf67d48a65e30e4a.
+
+	  Reason for revert: Under 13 this change appears to break HTTP
+	  body processing, causing test failures and problems.
+
+	  Change-Id: Ica47ca2cac1b21c6ef907c1ffbfaf2cebdea8e80
+
+2019-02-27 19:52 +0000 [85b1f8f886]  Sean Bright <sean.bright@gmail.com>
+
+	* res_pjsip_config_wizard: Don't crash if misconfigured
+
+	  If both send_registrations and send_auth are both set to yes,
+	  outbound_auth/username must be set or we crash.
+
+	  ASTERISK-27992 #close
+
+	  Change-Id: I6418d56de1ae53f80393b314c2584048fbf7f11d
+
+2019-02-13 15:24 +0000 [41effb7d4d]  Kevin Harwell <kharwell@digium.com>
+
+	* res_pjsip_registrar: blocked threads on reliable transport shutdown take 3
+
+	  When a contact was removed by the registrar it did not always check to see if
+	  the circumstances involved a monitored reliable transport. For instance, if the
+	  'remove_existing' option was set to 'true' then when existing contacts were
+	  removed due to 'max_contacts' being reached, those existing contacts being
+	  removed did not unregister the transport monitor.
+
+	  Also, it was possible to add more than one monitor on a reliable transport for
+	  a given aor and contact.
+
+	  This patch makes it so all contact removals done by the registrar also remove
+	  any associated transport monitors if necessary. It also makes it so duplicate
+	  monitors cannot be added for a given transport.
+
+	  ASTERISK-28213
+
+	  Change-Id: I94b06f9026ed177d6adfd538317c784a42c1b17a
+
+2019-02-27 10:37 +0000 [5ce084579f]  George Joseph <gjoseph@digium.com>
+
+	* CI: Update jenkinsfiles with new Gerrit URLs
+
+	  The recent upgrade of Gerrit to 2.16 elimiated referencing a
+	  repository in a way the jenkinsfiles were relying on so
+	  the URL references were changed to a more consistent and supported
+	  format.
+
+	  Change-Id: I2e8e3f213b9a96bb1b27665eca4a9a24bc49820e
+
+2019-02-20 13:15 +0000 [4aa55a8ca6]  George Joseph <gjoseph@digium.com>
+
+	* res_mwi_devstate.c: New module to allow presence subs to VM boxes
+
+	  This module allows presence subscriptions to voicemail boxes.  This
+	  allows common BLF keys to act as voicemail waiting indicators.
+
+	  ASTERISK-28301
+
+	  Change-Id: I62a246c24f3d7d432e33e22d7a4a57c15c292fdd
+
+2019-02-25 09:41 +0000 [e9bd8c4204]  Torrey Searle <torrey@voxbone.com>
+
+	* res/res_rtp_asterisk: smoother can cause wrong timestamps if dtmf happen
+
+	  Delivery timeval in the smoother object will fall behind while a DTMF is
+	  being generated.  This can eventually lead to invalid rtp timestamps.
+	  To prevent this from happening the smoother needs to be reset after every
+	  DTMF to keep the timing up to date.
+
+	  ASTERISK-28303 #close
+
+	  Change-Id: Iaba3f7b428ebd72a4caa90e13b829ab4f088310f
+
+2019-02-25 15:32 +0000 [ec7f92c4ef]  Kevin Harwell <kharwell@digium.com>
+
+	* rest-api-templates/asterisk_processor - replace http line breaks with line feed
+
+	  Including line breaks (<br>, <br/>, <br />) in certain parts of the rest-api
+	  json definition (e.g. summary, notes) displays them correctly in swagger.
+	  However, when the field gets converted to the wiki format those breaks get
+	  escaped and show up in the text as the actual string literal "<br>" etc...
+
+	  This patch makes it so when converting to the wiki format it replaces all line
+	  break values (<br>, etc...) with line feeds ('\n').
+
+	  Change-Id: Ie1c9faa0d1c5d622804cc0a21ce769095b08aa3d
+
+2019-02-25 06:10 +0000 [9c94c027cd]  Joshua C. Colp <jcolp@digium.com>
+
+	* res_ari_applications: Fix incorrect call to ao2_lock.
+
+	  When listing the applications the apps lock was incorrectly
+	  locked twice instead of being locked and then unlocked.
+
+	  ASTERISK-28302
+
+	  Change-Id: If7d064592a9e88c0f1049214c50e02be6dabf79e
+
+2019-01-09 04:27 +0000 [148ddfba9a]  Sungtae Kim <sungtae@messagebird.com>
+
+	* http.c: Support separated HTTP request
+
+	  Currently, the Asterisk does not support seperated HTTP request.
+	  This patch make the Asterisk enables to wait lest part of HTTP request.
+	  Also increases acceptable HTTP body length to 40k to support more
+	  larger request.
+
+	  ASTERISK-28236
+
+	  Change-Id: I48a401aa64a21c3b37bf3cb4e0486d64b7dd8aa1
+
+2019-02-20 12:48 +0000 [23ffc3af5c]  George Joseph <gjoseph@digium.com>
+
+	* Core:  Increase AST_PBX_MAX_STACK to 512 if not LOW_MEMORY
+
+	  The current settings AST_PBX_MAX_STACK is 128 entries which is
+	  too low for some FreePBX installations with complex parking
+	  arrangements.  Increased to 512 if LOW_MEMORY is not defined.
+
+	  ASTERISK-28300
+
+	  Change-Id: I7c4b540bc92e6642df0f3da639b003f7da8b1299
+
+2019-02-20 12:22 +0000 [82758295df]  Joshua C. Colp <jcolp@digium.com>
+
+	* stasis: Store subscriber uniqueids with topic statistics.
+
+	  This change provides an easier mechanism to determine which
+	  subscribers are subscribed to a topic. Using this you can
+	  inspect the specific subscribers for further details.
+
+	  Change-Id: I8deea21703cd5c5357b85593b46c3eaf24e18c0c
+
+2019-02-15 12:53 +0000 [bae3fd04c1]  George Joseph <gjoseph@digium.com>
+
+	* taskprocessor:  Enable subsystems and overload by subsystem
+
+	  To prevent one subsystem's taskprocessors from causing others
+	  to stall, new capabilities have been added to taskprocessors.
+
+	  * Any taskprocessor name that has a '/' will have the part
+	    before the '/' saved as its "subsystem".
+	    Examples:
+	    "sorcery/acl-0000006a" and "sorcery/aor-00000019"
+	    will be grouped to subsystem "sorcery".
+	    "pjsip/distributor-00000025" and "pjsip/distributor-00000026"
+	    will bn grouped to subsystem "pjsip".
+	    Taskprocessors with no '/' have an empty subsystem.
+
+	  * When a taskprocessor enters high-water alert status and it
+	    has a non-empty subsystem, the subsystem alert count will
+	    be incremented.
+
+	  * When a taskprocessor leaves high-water alert status and it
+	    has a non-empty subsystem, the subsystem alert count will be
+	    decremented.
+
+	  * A new api ast_taskprocessor_get_subsystem_alert() has been
+	    added that returns the number of taskprocessors in alert for
+	    the subsystem.
+
+	  * A new CLI command "core show taskprocessor alerted subsystems"
+	    has been added.
+
+	  * A new unit test was addded.
+
+	  REMINDER: The taskprocessor code itself doesn't take any action
+	  based on high-water alerts or overloading.  It's up to taskprocessor
+	  users to check and take action themselves.  Currently only the pjsip
+	  distributor does this.
+
+	  * A new pjsip/global option "taskprocessor_overload_trigger"
+	    has been added that allows the user to select the trigger
+	    mechanism the distributor uses to pause accepting new requests.
+	    "none": Don't pause on any overload condition.
+	    "global": Pause on ANY taskprocessor overload (the default and
+	    current behavior)
+	    "pjsip_only": Pause only on pjsip taskprocessor overloads.
+
+	  * The core pjsip pool was renamed from "SIP" to "pjsip" so it can
+	    be properly grouped into the "pjsip" subsystem.
+
+	  * stasis taskprocessor names were changed to "stasis" as the
+	    subsystem.
+
+	  * Sorcery core taskprocessor names were changed to "sorcery" to
+	    match the object taskprocessors.
+
+	  Change-Id: I8c19068bb2fc26610a9f0b8624bdf577a04fcd56
+
+2019-02-08 13:07 +0000 [da93d17af8]  Kevin Harwell <kharwell@digium.com>
+
+	* ARI event type filtering
+
+	  Event type filtering is now enabled, and configurable per application. An app is
+	  now able to specify which events are sent to the application by configuring an
+	  allowed and/or disallowed list(s). This can be done by issuing the following:
+
+	  PUT /applications/{applicationName}/eventFilter
+
+	  And then enumerating the allowed/disallowed event types as a body parameter.
+
+	  ASTERISK-28106
+
+	  Change-Id: I9671ba1fcdb3b6c830b553d4c5365aed5d588d5b
+
+2019-02-14 17:09 +0000 [f6689547ae]  sungtae kim <sungtae@messagebird.com>
+
+	* chan_pjsip: Changed to continued after invalid media for pjsip show channelstats
+
+	  Currently, the pjsip show channelstats cli does not show channel's
+	  stats after hits the invalid channel info. This makes hard to use
+	  this cli. Changed to keep iterate after hits the invalid channel
+	  info.
+
+	  ASTERISK-28292
+
+	  Change-Id: I3efdff1c9e1b1efd3c971fb82ae77aa133a6f43c
+
+2019-02-19 10:06 +0000 [46df13e2d0]  Joshua Colp <jcolp@digium.com>
+
+	* CI: Use tmpfs option to Docker instead of mount.
+
+	  Some tests require Asterisk to execute scripts which
+	  are stored in /tmp. When mount is used for tmpfs there
+	  is no ability to allow scripts to be executed from
+	  that location.
+
+	  This change switches to using tmpfs which can be told
+	  to allow executables to be run from /tmp.
+
+	  Change-Id: I0e598ca2b76af1f7f2d29f0da7b1731a214a291a
+
+2019-02-08 13:01 +0000 [b2d3c9d2de]  Kevin Harwell <kharwell@digium.com>
+
+	* json.c/strings.c - Add a couple of utility functions
+
+	  Added 'ast_json_object_string_get' to the JSON wrapper in order to make it a
+	  little easier to retrieve a string field from the JSON object.
+
+	  Also added an 'ast_strings_equal' function that safely checks (checks for NULLs)
+	  for equality between two strings.
+
+	  Change-Id: I26f0a16d61537505eb41b4b05ef2e6d67fc2541b
+
+2019-02-14 10:53 +0000 [3e922adcc1]  Chris Savinovich <csavinovich@digium.com>
+
+	* Revert "Test_cel: Fails when DONT_OPTIMIZE is off"
+
+	  This reverts commit 9b85882f04ed4b48e7bb318dbbb969d90159f13a.
+
+	  Change-Id: I36cf159abb103502e48d6f8fd70d560d7f0bda56
+
+2019-02-12 03:50 +0000 [7c17bc75ed]  Torrey Searle <torrey@voxbone.com>
+
+	* res/res_rtp_asterisk: clear smoother when local bridging
+
+	  p2p_write updates txformat but doesn't require a smoother.  If a smoother
+	  was created by another bridge type the smoother could fall out of date causing
+	  one way audio issues.  To prevent this the smoother is now destroyed on the
+	  start of native bridge.
+
+	  ASTERISK-28284 #close
+
+	  Change-Id: I84e67f144963787fff9b4d79ac500514fb40cdc6
+
+2019-02-13 07:36 +0000 [2db81ee2b4]  Paulo Vicentini <paulo.vicentini@gmail.com>
 
 	* res/res_pjsip: Resources (udptl fd) are leaking for T.38 calls
 
@@ -16,11 +854,19 @@
 
 	  Change-Id: Id6dceceb06651b03f611bf33deb3061022fe5d0c
 
-2019-02-11 11:10 +0000  Asterisk Development Team <asteriskteam@digium.com>
+2019-02-07 09:52 +0000 [9a6464e54f]  Joshua Colp <jcolp@digium.com>
 
-	* asterisk 13.25.0-rc2 Released.
+	* ci: Rerun unit tests when non-code changes occur.
 
-2019-01-31 13:29 +0000 [933a7ac262]  Kevin Harwell <kharwell@digium.com>
+	  This change makes it so that even if non-code changes
+	  occur (such as commit message changing) unit tests
+	  will still be run and result in a verification.
+
+	  ASTERISK-28251
+
+	  Change-Id: I6491fff7c93e5d5cd8e41054486968bf66c4f608
+
+2019-01-31 13:29 +0000 [3974633c00]  Kevin Harwell <kharwell@digium.com>
 
 	* res_pjsip_registrar: lock transport monitor when setting 'removing' flag
 
@@ -36,7 +882,51 @@
 	  ASTERISK-28213
 
 	  Change-Id: Iaa8e36e5311789549b76d8de42dfcea96013b2ed
-	  (cherry picked from commit 3974633c00fa81573065e415f61f44be2b032f2a)
+
+2019-02-06 06:16 +0000 [a4d930c2ed]  Joshua Colp <jcolp@digium.com>
+
+	* res_odbc: Add basic query logging.
+
+	  When Asterisk is connected and used with a database the response
+	  time of the database can cause problems in Asterisk if it is long.
+	  Normally the only way to see this problem would be to retrieve a
+	  backtrace from Asterisk and examine where things are blocked, or
+	  examine the database to see if there is any indication of a
+	  problem.
+
+	  This change adds some basic query logging to make it easier to
+	  investigate such a problem. When logging is enabled res_odbc will
+	  now keep track of the number of queries executed, as well as the
+	  query that has taken the longest time to execute. There is also
+	  an option which will cause a WARNING message to be output if a
+	  query takes longer than a configurable amount of time to execute.
+
+	  This makes it easier and clearer for users that their database may
+	  be experiencing a problem that could impact Asterisk.
+
+	  ASTERISK-28277
+
+	  Change-Id: I173cf4928b10754478a6a8c27dfa96ede0f058a6
+
+2018-12-05 16:09 +0000 [f16d711679]  Sungtae Kim <pchero21@gmail.com>
+
+	* main/cdr: Fixed cdr start overwriting
+
+	  The CDR was overwriting the start time when the call continued the
+	  dialplan from the ARI stasis or a Local channel was originated.
+
+	  This change fixes this by no longer reinitializing the CDR when
+	  transitioning out of the dialed pending state to the single state.
+
+	  ASTERISK-28181
+
+	  Change-Id: I921bc04064b6cff1deb2eea56a94d86489561cdc
+
+2019-02-04 13:55 +0000 [e70f8f7c20]  Sean Bright <sean.bright@gmail.com>
+
+	* sounds: Sort 'core show sounds' output
+
+	  Change-Id: Ib39052a745040f75eb635f15a042da15b20e22ab
 
 2019-02-06 11:01 +0000  Asterisk Development Team <asteriskteam@digium.com>
 
