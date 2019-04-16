@@ -3838,7 +3838,7 @@ static SQLHSTMT generic_prepare(struct odbc_obj *obj, void *data)
 		ast_log(AST_LOG_WARNING, "SQL Alloc Handle failed!\n");
 		return NULL;
 	}
-	res = SQLPrepare(stmt, (unsigned char *) gps->sql, SQL_NTS);
+	res = ast_odbc_prepare(obj, stmt, gps->sql);
 	if (!SQL_SUCCEEDED(res)) {
 		ast_log(AST_LOG_WARNING, "SQL Prepare failed![%s]\n", gps->sql);
 		SQLFreeHandle(SQL_HANDLE_STMT, stmt);
@@ -4361,7 +4361,7 @@ static SQLHSTMT insert_data_cb(struct odbc_obj *obj, void *vdata)
 	if (!ast_strlen_zero(data->category)) {
 		SQLBindParameter(stmt, 13, SQL_PARAM_INPUT, SQL_C_CHAR, SQL_CHAR, strlen(data->category), 0, (void *) data->category, 0, NULL);
 	}
-	res = SQLExecDirect(stmt, (unsigned char *) data->sql, SQL_NTS);
+	res = ast_odbc_execute_sql(obj, stmt, data->sql);
 	if (!SQL_SUCCEEDED(res)) {
 		ast_log(AST_LOG_WARNING, "SQL Direct Execute failed!\n");
 		SQLFreeHandle(SQL_HANDLE_STMT, stmt);
@@ -13361,6 +13361,7 @@ static void mwi_unsub_event_cb(struct stasis_subscription_change *change)
 static void mwi_sub_event_cb(struct stasis_subscription_change *change)
 {
 	struct mwi_sub_task *mwist;
+	const char *topic;
 	char *context;
 	char *mailbox;
 
@@ -13369,7 +13370,9 @@ static void mwi_sub_event_cb(struct stasis_subscription_change *change)
 		return;
 	}
 
-	if (separate_mailbox(ast_strdupa(stasis_topic_name(change->topic)), &mailbox, &context)) {
+	/* The topic name is prefixed with "mwi:all/" as this is a pool topic */
+	topic = stasis_topic_name(change->topic) + 8;
+	if (separate_mailbox(ast_strdupa(topic), &mailbox, &context)) {
 		ast_free(mwist);
 		return;
 	}

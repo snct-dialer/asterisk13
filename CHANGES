@@ -9,6 +9,54 @@
 ==============================================================================
 
 ------------------------------------------------------------------------------
+--- Functionality changes from Asterisk 13.25.0 to Asterisk 13.26.0 ----------
+------------------------------------------------------------------------------
+
+ARI
+------------------
+ * Application event filtering is now supported. An application can now specify
+   an "allowed" and/or "disallowed" list(s) of event types. Only those types
+   indicated in the "allowed" list are sent to the application. Conversely, any
+   types defined in the "disallowed" list are not sent to the application. Note
+   that if a type is specified in both lists "disallowed" takes precedence.
+
+ * A new REST API call has been added: 'move'. It follows the format
+   'channels/{channelId}/move' and can be used to move channels from one application
+   to another without needing to exit back into the dialplan. An application must be
+   specified, but the passing a list of arguments to the new application is optional.
+   An example call would look like this:
+
+   client.channels.move(channelId=chan.id, app='ari-example', appArgs='a,b,c')
+
+   If the channel was inside of a bridge when switching applications, it will
+   remain there. If the application specified cannot be moved to, then the channel
+   will remain in the current application and an event will be triggered named
+   "ApplicationMoveFailed", which will provide the destination application's name
+   and the channel information.
+
+res_pjsip
+------------------
+ * A new configuration parameter "taskprocessor_overload_trigger" has been
+   added to the pjsip.conf "globals" section.  The distributor currently stops
+   accepting new requests when any taskprocessor overload is triggered.  The
+   new option allows you to completely disable overload detection (NOT
+   RECOMMENDED), keep the current behavior, or trigger only on pjsip
+   taskprocessor overloads.
+
+chan_pjsip
+------------------
+ * A new configuration parameter 'ignore_183_without_sdp' has been added
+   to the pjsip.conf "endpoints" section.  If enabled, will make chan_pjsip
+   discard 183s that do not contain an SDP body, which can resolve no
+   ringback tone issues as well as making the behavior match chan_sip.
+
+MWI
+------------------
+ * A new module "res_mwi_devstate" has been added that allows subscriptions
+   to voicemail boxes using "presence" events.  This allows common BLF keys
+   to act as voicemail waiting indicators.
+
+------------------------------------------------------------------------------
 --- Functionality changes from Asterisk 13.24.0 to Asterisk 13.25.0 ----------
 ------------------------------------------------------------------------------
 

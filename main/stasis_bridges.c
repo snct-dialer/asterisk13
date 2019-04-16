@@ -194,12 +194,22 @@ struct stasis_topic *ast_bridge_topic_all_cached(void)
 
 int bridge_topics_init(struct ast_bridge *bridge)
 {
+	char *topic_name;
+	int ret;
+
 	if (ast_strlen_zero(bridge->uniqueid)) {
 		ast_log(LOG_ERROR, "Bridge id initialization required\n");
 		return -1;
 	}
+
+	ret = ast_asprintf(&topic_name, "bridge:%s", bridge->uniqueid);
+	if (ret < 0) {
+		return -1;
+	}
+
 	bridge->topics = stasis_cp_single_create(bridge_cache_all,
-		bridge->uniqueid);
+		topic_name);
+	ast_free(topic_name);
 	if (!bridge->topics) {
 		return -1;
 	}
@@ -277,6 +287,7 @@ struct ast_bridge_snapshot *ast_bridge_snapshot_create(struct ast_bridge *bridge
 	snapshot->capabilities = bridge->technology->capabilities;
 	snapshot->num_channels = bridge->num_channels;
 	snapshot->num_active = bridge->num_active;
+	snapshot->creationtime = bridge->creationtime;
 	snapshot->video_mode = bridge->softmix.video_mode.mode;
 	if (snapshot->video_mode == AST_BRIDGE_VIDEO_MODE_SINGLE_SRC
 		&& bridge->softmix.video_mode.mode_data.single_src_data.chan_vsrc) {
@@ -610,7 +621,7 @@ struct ast_json *ast_bridge_snapshot_to_json(
 		return NULL;
 	}
 
-	json_bridge = ast_json_pack("{s: s, s: s, s: s, s: s, s: s, s: s, s: o, s: s}",
+	json_bridge = ast_json_pack("{s: s, s: s, s: s, s: s, s: s, s: s, s: o, s: o, s: s}",
 		"id", snapshot->uniqueid,
 		"technology", snapshot->technology,
 		"bridge_type", capability2str(snapshot->capabilities),
@@ -618,6 +629,7 @@ struct ast_json *ast_bridge_snapshot_to_json(
 		"creator", snapshot->creator,
 		"name", snapshot->name,
 		"channels", json_channels,
+		"creationtime", ast_json_timeval(snapshot->creationtime, NULL),
 		"video_mode", ast_bridge_video_mode_to_string(snapshot->video_mode));
 	if (!json_bridge) {
 		return NULL;
@@ -1290,7 +1302,7 @@ int ast_stasis_bridging_init(void)
 
 	ast_register_cleanup(stasis_bridging_cleanup);
 
-	bridge_cache_all = stasis_cp_all_create("ast_bridge_topic_all",
+	bridge_cache_all = stasis_cp_all_create("bridge:all",
 		bridge_snapshot_get_id);
 
 	if (!bridge_cache_all) {

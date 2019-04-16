@@ -2755,6 +2755,14 @@ static double normdev_compute(double normdev, double sample, unsigned int sample
 	normdev = normdev * sample_count + sample;
 	sample_count++;
 
+	/*
+	 It's possible the sample_count hits the maximum value and back to 0.
+	 Set to 1 to prevent the divide by zero crash if the sample_count is 0.
+	 */
+	if (sample_count == 0) {
+		sample_count = 1;
+	}
+
 	return normdev / sample_count;
 }
 
@@ -2770,6 +2778,14 @@ static double stddev_compute(double stddev, double sample, double normdev, doubl
 
 	stddev = sample_count * stddev;
 	sample_count++;
+
+	/*
+	 It's possible the sample_count hits the maximum value and back to 0.
+	 Set to 1 to prevent the divide by zero crash if the sample_count is 0.
+	 */
+	if (sample_count == 0) {
+		sample_count = 1;
+	}
 
 	return stddev +
 		( sample_count * SQUARE( (sample - normdev) / sample_count ) ) +
@@ -3566,6 +3582,12 @@ static int ast_rtp_dtmf_end_with_duration(struct ast_rtp_instance *instance, cha
 
 	/* Oh and we can't forget to turn off the stuff that says we are sending DTMF */
 	rtp->lastts += calc_txstamp(rtp, NULL) * DTMF_SAMPLE_RATE_MS;
+
+	/* Reset the smoother as the delivery time stored in it is now out of date */
+	if (rtp->smoother) {
+		ast_smoother_free(rtp->smoother);
+		rtp->smoother = NULL;
+	}
 cleanup:
 	rtp->sending_digit = 0;
 	rtp->send_digit = 0;
@@ -6153,6 +6175,10 @@ static int ast_rtp_local_bridge(struct ast_rtp_instance *instance0, struct ast_r
 
 	ao2_lock(instance0);
 	ast_set_flag(rtp, FLAG_NEED_MARKER_BIT | FLAG_REQ_LOCAL_BRIDGE_BIT);
+	if (rtp->smoother) {
+		ast_smoother_free(rtp->smoother);
+		rtp->smoother = NULL;
+	}
 	ao2_unlock(instance0);
 
 	return 0;
