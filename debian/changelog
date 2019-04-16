@@ -1,9 +1,15 @@
-asterisk (2:13.25.0~se-1) UNRELEASED; urgency=medium
+asterisk (2:13.25.0~se-2) stable; urgency=medium
+
+  * New debian/patches/0115-vicidial.patch: Fix AMD issues.
+
+ -- Jörg Frings-Fürst <debian@jff.email>  Fri, 12 Apr 2019 10:41:05 +0200
+
+asterisk (2:13.25.0~se-1) stretch; urgency=medium
 
   * New upstream release.
   * Fix app_voicemail.
 
- -- Jörg Frings-Fürst <debian@jff.email>  Sun, 10 Mar 2019 10:21:55 +0100
+ -- Jörg Frings-Fürst <debian@jff.email>  Sun, 10 Mar 2019 19:13:45 +0100
 
 asterisk (2:13.17.0~fp-1) stable; urgency=medium
 
