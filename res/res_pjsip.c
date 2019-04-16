@@ -1074,6 +1074,16 @@
 						option allows the 'Q.850' Reason header to be suppressed.</para>
 					</description>
 				</configOption>
+				<configOption name="ignore_183_without_sdp" default="no">
+					<synopsis>Do not forward 183 when it doesn't contain SDP</synopsis>
+					<description><para>
+						Certain SS7 internetworking scenarios can result in a 183
+						to be generated for reasons other than early media.  Forwarding
+						this 183 can cause loss of ringback tone.  This flag emulates
+						the behavior of chan_sip and prevents these 183 responses from
+						being forwarded.</para>
+					</description>
+				</configOption>
 			</configObject>
 			<configObject name="auth">
 				<synopsis>Authentication type</synopsis>
@@ -1843,6 +1853,26 @@
 				</configOption>
 				<configOption name="send_contact_status_on_update_registration" default="yes">
 					<synopsis>Enable sending AMI ContactStatus event when a device refreshes its registration.</synopsis>
+				</configOption>
+				<configOption name="taskprocessor_overload_trigger">
+					<synopsis>Trigger scope for taskprocessor overloads</synopsis>
+					<description><para>
+						This option specifies the trigger the distributor will use for
+						detecting taskprocessor overloads.  When it detects an overload condition,
+						the distrubutor will stop accepting new requests until the overload is
+						cleared.
+						</para>
+						<enumlist>
+							<enum name="global"><para>(default) Any taskprocessor overload will trigger.</para></enum>
+							<enum name="pjsip_only"><para>Only pjsip taskprocessor overloads will trigger.</para></enum>
+							<enum name="none"><para>No overload detection will be performed.</para></enum>
+						</enumlist>
+						<warning><para>
+						The "none" and "pjsip_only" options should be used
+						with extreme caution and only to mitigate specific issues.
+						Under certain conditions they could make things worse.
+						</para></warning>
+					</description>
 				</configOption>
 			</configObject>
 		</configFile>
@@ -4267,7 +4297,7 @@ struct ast_taskprocessor *ast_sip_create_serializer_group(struct ast_serializer_
 	char tps_name[AST_TASKPROCESSOR_MAX_NAME + 1];
 
 	/* Create name with seq number appended. */
-	ast_taskprocessor_build_name(tps_name, sizeof(tps_name), "pjsip-group-serializer");
+	ast_taskprocessor_build_name(tps_name, sizeof(tps_name), "pjsip/group-serializer");
 
 	return ast_sip_create_serializer_group_named(tps_name, shutdown_group);
 }
@@ -4282,7 +4312,7 @@ struct ast_taskprocessor *ast_sip_create_serializer(void)
 	char tps_name[AST_TASKPROCESSOR_MAX_NAME + 1];
 
 	/* Create name with seq number appended. */
-	ast_taskprocessor_build_name(tps_name, sizeof(tps_name), "pjsip-serializer");
+	ast_taskprocessor_build_name(tps_name, sizeof(tps_name), "pjsip/serializer");
 
 	return ast_sip_create_serializer_group_named(tps_name, NULL);
 }
@@ -4993,7 +5023,7 @@ static int load_module(void)
 	/* The serializer needs threadpool and threadpool needs pjproject to be initialized so it's next */
 	sip_get_threadpool_options(&options);
 	options.thread_start = sip_thread_start;
-	sip_threadpool = ast_threadpool_create("SIP", NULL, &options);
+	sip_threadpool = ast_threadpool_create("pjsip", NULL, &options);
 	if (!sip_threadpool) {
 		goto error;
 	}
