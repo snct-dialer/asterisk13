@@ -1,4 +1,10 @@
-asterisk (2:13.25.0~se-2) stable; urgency=medium
+asterisk (2:13.26.0~se-3) stretch; urgency=medium
+
+  * New upstream release.
+
+ -- Jörg Frings-Fürst <debian@jff.email>  Tue, 16 Apr 2019 10:07:33 +0200
+
+asterisk (2:13.25.0~se-2) stretch; urgency=medium
 
   * New debian/patches/0115-vicidial.patch: Fix AMD issues.
 
