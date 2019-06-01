@@ -11,8 +11,10 @@ Author: Tzafrir Cohen <tzafrir.cohen@xorcom.com>
 Forwarded: no
 Last-Update: 2016-04-02
 
---- a/sounds/sounds.xml
-+++ b/sounds/sounds.xml
+Index: trunk/sounds/sounds.xml
+===================================================================
+--- trunk.orig/sounds/sounds.xml
++++ trunk/sounds/sounds.xml
 @@ -10,7 +10,6 @@
  		</member>
  		<member name="CORE-SOUNDS-EN-GSM" displayname="English, GSM format" >
@@ -21,7 +23,7 @@ Last-Update: 2016-04-02
  		</member>
  		<member name="CORE-SOUNDS-EN-G729" displayname="English, G.729 format">
  			<support_level>core</support_level>
-@@ -246,7 +245,6 @@
+@@ -273,7 +272,6 @@
  	</category>
  	<category name="MENUSELECT_MOH" displayname="Music On Hold File Packages" positive_output="yes">
  		<member name="MOH-OPSOUND-WAV" displayname="opsound.org Music On Hold Files, WAV format" >
