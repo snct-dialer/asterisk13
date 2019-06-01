@@ -1271,5 +1271,11 @@ ALTER TABLE ps_endpoints ADD COLUMN ignore_183_without_sdp ast_bool_values;
 
 UPDATE alembic_version SET version_num='80473bad3c16' WHERE alembic_version.version_num = 'f3c0b8695b66';
 
+-- Running upgrade 80473bad3c16 -> 3a094a18e75b
+
+ALTER TABLE ps_globals ADD COLUMN norefersub ast_bool_values;
+
+UPDATE alembic_version SET version_num='3a094a18e75b' WHERE alembic_version.version_num = '80473bad3c16';
+
 COMMIT;
 
