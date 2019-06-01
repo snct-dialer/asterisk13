@@ -1,6 +1,510 @@
-2019-04-04 14:46 +0000  Asterisk Development Team <asteriskteam@digium.com>
+2019-05-30 17:20 +0000  Asterisk Development Team <asteriskteam@digium.com>
 
-	* asterisk 13.26.0 Released.
+	* asterisk 13.27.0 Released.
+
+2019-05-22 18:35 +0000  Asterisk Development Team <asteriskteam@digium.com>
+
+	* asterisk 13.27.0-rc1 Released.
+
+2019-05-20 12:45 +0000 [fc49632bbc]  Joshua Colp <jcolp@digium.com>
+
+	* pjproject-bundled:  Add upstream timer fixes
+
+	  Fixed #2191:
+	    - Stricter double timer entry scheduling prevention.
+	    - Integrate group lock in SIP transport, e.g: for add/dec ref,
+	      for timer scheduling.
+
+	  ASTERISK-28161
+	  Reported-by: Ross Beer
+
+	  Change-Id: I2e09aa66de0dda9414d8a8259a649c4d2d96a9f5
+
+2019-05-17 18:44 +0000 [90fe830a77]  George Joseph <gjoseph@digium.com>
+
+	* res_rtp_asterisk:  Add ability to propose local address in ICE
+
+	  You can now add the "include_local_address" flag to an entry in
+	  rtp.conf "[ice_host_candidates]" to include both the advertized
+	  address and the local address in ICE negotiation:
+
+	  [ice_host_candidates]
+	  192.168.1.1 = 1.2.3.4,include_local_address
+
+	  This causes both 192.168.1.1 and 1.2.3.4 to be advertized.
+
+	  Change-Id: Ide492cd45ce84546175ca7d557de80d9770513db
+
+2019-05-10 10:48 +0000 [4337895aee]  George Joseph <gjoseph@digium.com>
+
+	* Fixes for GCC 9
+
+	  Various fixes for issues caught by gcc 9.  Mostly snprintf
+	  trying to copy to a buffer potentially too small.
+
+	  ASTERISK-28412
+
+	  Change-Id: I9e85a60f3c81d46df16cfdd1c329ce63432cf32e
+
+2019-05-07 14:24 +0000 [c41e3184e3]  George Joseph <gjoseph@digium.com>
+
+	* Revert "pjproject-bundled:  Add upstream timer fixes"
+
+	  This reverts commit cfeb8a59eb892e7f72b5ce0acfc0dbde1a51d3b8.
+
+	  The fixes in question cause assert failures when pjproject
+	  asserts are enabled.  Reverting in 13 until a solution is
+	  found for all branches.
+
+	  Change-Id: Iae5bd340e0543613185fecb63f9c86fa985fe664
+
+2019-05-07 11:08 +0000 [f71a0e3f60]  Ben Ford <bford@digium.com>
+
+	* pjsip_options.c: Allow immediate qualifies for new contacts.
+
+	  When multiple endpoints try to register close together using the same
+	  AOR with qualify_frequency set, one contact would qualify immediately
+	  while the other contacts would have to wait out the duration of the
+	  timer before being able to qualify. Changing the conditional to check
+	  the contact container count for a non-zero value allows all contacts to
+	  qualify immediately.
+
+	  Change-Id: I79478118ee7e0d6e76af7c354d66684220db9415
+
+2019-05-03 13:31 +0000 [7646e2257f]  George Joseph <gjoseph@digium.com>
+
+	* build: Pass --fno-partial-inlining to third-party when appropriate
+
+	  When the gcc version is >= 8.2.1, we were already setting the
+	  --fno-partial-inlining flag for Asterisk source files to get around
+	  a gcc bug but we weren't passing the flag down to the bundled
+	  builds of pjproject and jansson.
+
+	  ASTERISK-28392
+
+	  Change-Id: I99ede9bc35408ecd096f7d5369e8192d3dc75704
+
+2019-05-03 08:27 +0000 [cfeb8a59eb]  George Joseph <gjoseph@digium.com>
+
+	* pjproject-bundled:  Add upstream timer fixes
+
+	  Fixed #2191:
+	    - Stricter double timer entry scheduling prevention.
+	    - Integrate group lock in SIP transport, e.g: for add/dec ref,
+	      for timer scheduling.
+
+	  ASTERISK-28161
+	  Reported-by: Ross Beer
+
+	  Change-Id: I02a791fd1570a1e594a132b36c4ff72441108c17
+
+2019-05-02 13:29 +0000 [9d8a093a94]  George Joseph <gjoseph@digium.com>
+
+	* res_pjsip:  Check return from pjsip_parse_uri calls
+
+	  Updated ast_sip_create_rdata_with_contact and registrar_find_contact
+	  to check the return from pjsip_parse_uri before attempting to
+	  use the uri returned.
+
+	  ASTERISK-28402
+	  Reported-by: Ross Beer
+
+	  Change-Id: I9810b3b163c45ed5a56ec743586e5ce107f13ba7
+
+2018-12-04 02:10 +0000 [188b1d3e68]  Abhay Gupta <abhay@avissol.com>
+
+	* app_amd: Fix infinite loop on silent calls
+
+	  The total time logic will now be executed on calls which
+	  do not pass any media.
+
+	  ASTERISK-28143
+
+	  Change-Id: I24726bd29d7e467fc721ca265363417234b22855
+
+2019-04-23 09:47 +0000 [4589260961]  Ben Ford <bford@digium.com>
+
+	* stasis: Fix crash at shutdown.
+
+	  When compiling in dev mode, stasis statistics are enabled and can cause
+	  a crash at shutdown due to the following:
+	  - Containers are freed
+	  - Topics and subscriptions remain
+	  - When those topics and subscriptions are deallocated, they go to do
+	    things with the container
+
+	  This changes the containers to global ao2 objects, and whenever needed
+	  in the code, a reference must be obtained and checked before any
+	  operations can be done.
+
+	  ASTERISK-28353 #close
+
+	  Change-Id: Ie7d5e907fcfcb4d65bd36d5e4eb923126fde8d33
+
+2019-03-29 09:04 +0000 [001e7762e4]  Antoni Goldstein <action@gdevel.com>
+
+	* app_dial.c: RINGTIME, PROGRESSTIME and ms resolution dial timings
+
+	  Added RINGTIME, RINGTIME_MS, PROGRESSTIME, PROGRESSTIME_MS variables filled
+	  at the earliest received PROGRESS or RINGING.
+	  Added millisecond versions of DIALEDTIME and ANSWEREDTIME.
+
+	  Added millisecond versions of ast_channel_get_up_time and
+	  ast_channel_get_duration in channel.c.
+
+	  ASTERISK-28363
+
+	  Change-Id: If95f1a7d8c4acbac740037de0c6e3109ff6620b1
+
+2019-04-09 14:09 +0000 [4ea20c9c85]  Kevin Harwell <kharwell@digium.com>
+
+	* mwi core: Move core MWI functionality into its own files
+
+	  There is enough MWI functionality to warrant it having its own 'c' and header
+	  files. This patch moves all current core MWI data structures, and functions
+	  into the following files:
+
+	  main/mwi.h
+	  main/mwi.c
+
+	  Note, code was simply moved, and not modified. However, this patch is also in
+	  preparation for core MWI changes, and additions to come.
+
+	  Change-Id: I9dde8bfae1e7ec254fa63166e090f77e4d3097e0
+
+2019-04-22 11:09 +0000 [6d4023e3a6]  George Joseph <gjoseph@digium.com>
+
+	* ARI: Bump non-breaking version number to 1.10.2
+
+	  main/json.c: Added app_name, app_data to channel type
+	  res/res_ari: Added ARI resource /ari/channels/{channelId}/rtp_statistics
+	  res/res_ari: Added timestamp as a requirement for all ARI events
+
+	  Change-Id: Ie0da5b0cf0623b0d0fddbb864f73cb676c2b55cd
+
+2019-04-07 11:36 +0000 [8ee69fbdd0]  Guido Falsi <madpilot@freebsd.org>
+
+	* core/buildsystem: check the actual compiler being version
+
+	  Make compiler check use the output of the actual compiler being
+	  used as reported by the CC variable, instead of unconditionally
+	  running the "gcc" binary.  Also only run the check if the compiler
+	  is gcc or a cross-compile gcc.
+
+	  ASTERISK-28374
+
+	  Change-Id: Icaacf6d93686ad21076878aa1504a23b4fc9d0f4
+
+2019-04-19 09:33 +0000 [aaee0fa6f5]  Lucas Mendes <lucas.mendes@wearespindle.com>
+
+	* res_indications: Fix indications remove command autocomplete
+
+	  We changed the validation of autocomplete parameter in the "indications
+	  remove" command to avoid continue the execution of the command after
+	  asking for autocomplete out of range parameters.
+
+	  ASTERISK-28391
+	  Reported by: lmendes86
+
+	  Change-Id: I92b24131fd02f2e3c7fec966eea6f7a663310d40
+
+2019-04-08 17:04 +0000 [00588226c6]  Dan Cropp <dan@amtelco.com>
+
+	* res_pjsip:  Added a norefersub configuration setting
+
+	  Added a new PJSIP global setting called norefersub.
+	  Default is true to keep support working as before.
+
+	  res_pjsip_refer:  Configures PJSIP norefersub capability accordingly.
+
+	  Checks the PJSIP global setting value.
+	  If it is true (default) it adds the norefersub capability to PJSIP.
+	  If it is false (disabled) it does not add the norefersub capability
+	  to PJSIP.
+
+	  This is useful for Cisco switches that do not follow RFC4488.
+
+	  ASTERISK-28375 #close
+	  Reported-by: Dan Cropp
+
+	  Change-Id: I0b1c28ebc905d881f4a16e752715487a688b30e9
+
+2019-04-16 10:58 +0000 [33ed8fdadc]  Sean Bright <sean.bright@gmail.com>
+
+	* res_mwi_devstate: Specify AST_MODFLAG_LOAD_ORDER to enable load priority
+
+	  Suggested by abelbeck on the issue tracker.
+
+	  ASTERISK~28384
+	  Reported by: abelbeck
+
+	  Change-Id: Icee0fff2b58dbfaa80f2b68270fe69dfb0463fc0
+
+2019-04-12 11:32 +0000 [2fe9fd5cf9]  George Joseph <gjoseph@digium.com>
+
+	* CI: Move test group config files to Jenkins
+
+	  One of the downaides of having things like test configuration
+	  in the git repo is that it can't be changed at runtime.  You have
+	  to create a review for the changes and merge it mefore it will
+	  take effect.
+
+	  This review moves the data currently held in
+	  tests/CI/periodic-dailyTestGroups.json and
+	  tests/CI/gateTestGroups.json into a Jenkins Config File attached
+	  to the job definitions.  This allows us to alter it from the
+	  Jenkins UI at runtime.  The original files stay in the repo
+	  as documentation.
+
+	  Change-Id: I14b9702f6285ce1fb2420287ba0e7d3b59109763
+
+2019-04-13 13:36 +0000 [d2f519dcfa]  Sean Bright <sean.bright@gmail.com>
+
+	* app_voicemail: Don't split mailbox options on comma
+
+	  Because the per-mailbox options are the last thing on a line, don't look
+	  for or stomp on any subsequent commas.
+
+	  ASTERISK-27935 #close
+	  Reported by: Sébastien Duthil
+
+	  Change-Id: I07b2eb4a33c303d0c7114d5b906f8c067c60a153
+
+2019-04-12 09:33 +0000 [79a620080c]  Sean Bright <sean.bright@gmail.com>
+
+	* pbx.c: Ignore dashes in extensions when using extenpatternmatchnew
+
+	  Because hyphens are not matched literally in Asterisk dialplan, we need
+	  to ignore them in our candidate extensions as well.
+
+	  ASTERISK-17695 #close
+	  Reported by: test011
+
+	  Change-Id: I227f02301577b1633e8a55b9fe9dc149935c03f0
+
+2019-04-09 10:10 +0000 [fd2e8d0da7]  Sean Bright <sean.bright@gmail.com>
+
+	* app_voicemail: Cleanup stale lock files on module load
+
+	  If Asterisk crashes while a VM directory is locked, lock files in the VM
+	  spool directory will not get properly cleaned up. We now clear them on
+	  module load.
+
+	  ASTERISK-20207 #close
+	  Reported by: Steven Wheeler
+
+	  Change-Id: If40ccd508e2f6e5ade94dde2f0bcef99056d0aaf
+
+2019-04-11 15:48 +0000 [9051e62523]  Sean Bright <sean.bright@gmail.com>
+
+	* res_ael: Create consistent label names across reloads
+
+	  Reset the internal counter that the AEL2 compiler uses for unique label
+	  names before compiling. This keeps dialplan labels consistent across
+	  reloads assuming the AEL2 has not changed.
+
+	  ASTERISK-17799 #close
+	  Reported by: Kirill Katsnelson
+
+	  Change-Id: I30b3cc887d1ee0644d3f341e2fef16f525d7fae5
+
+2019-04-11 15:29 +0000 [237989a5e8]  Sean Bright <sean.bright@gmail.com>
+
+	* res_ael: Use Gosub in for loop expressions
+
+	  In AEL2, if a 'for' statement contains macro* calls, like:
+
+	      for (&iterator(${TRY},A); "${A}" != ""; &iterate(A)) {
+
+	  The AEL2 parser will translate these into calls to the deprecated Macro
+	  dialplan application and use the antiquated pipe delimiter.
+
+	  Instead, convert these into calls to the Gosub dialplan application and
+	  use commas as argument separators.
+
+	  ASTERISK-18593 #close
+	  Reported by: Luke-Jr
+
+	  * 'macro' in this context means AEL2 macros, not the 'Macro' application
+
+	  Change-Id: I3d73716033b8e3e42e0209d355bf5f10c97045fc
+
+2019-04-11 11:03 +0000 [f66f21895f]  Sean Bright <sean.bright@gmail.com>
+
+	* res_ael: Fix pattern matching against literal '+'
+
+	  When generating the regular expression that matches against existing
+	  extensions, we need to escape literal characters that can also be
+	  regular expression metacharacters. This was already being done for '*'
+	  but we need to do the same for '+'.
+
+	  In passing, remove some unreachable code - strcmp() is already run
+	  immediately when entering extension_matches().
+
+	  ASTERISK-14939 #close
+	  Reported by: klaus3000
+
+	  Change-Id: I8d2cccb3479168fba1b0a6704c52198b396468f1
+
+2019-04-11 12:49 +0000 [7666fdc394]  Sean Bright <sean.bright@gmail.com>
+
+	* pbx.c: Properly parse labels with leading digits
+
+	  If the target of a Goto is a label that starts with a number, we
+	  erroneously treat the leading digits as a priority.
+
+	  ASTERISK-20182 #close
+	  Reported by: Janu
+
+	  Change-Id: Ia78408c0805a729103917247ecfc802f6fafc94b
+
+2019-04-10 18:07 +0000 [9a1e8090c3]  Alexander Anikin <may213@yandex.ru>
+
+	* chan_ooh323: fix h323 log file path
+
+	  Change h323 log path relative to AST_LOG_DIR instead of
+	  /var/log/asterisk hardcoded
+	  Add return back error message from OOH323EP initialize
+
+	  ASTERISK-28348 #close
+
+	  Reported by: Dmitry Shubin
+
+	  Change-Id: Ib102dd36bbe6c2a7a4ce6870ae9110d9000d7e98
+
+2019-04-09 16:47 +0000 [cb24eb4cc2]  Alexei Gradinari <alex2grad@gmail.com>
+
+	* res_pjsip: Fix transport_states ref leak
+
+	  Add missing ao2_ref(transport_state, -1) while iterate on a transport_states
+	  container.
+
+	  Change-Id: I40e35b5a339121300c80075c30db47201a6c374e
+
+2019-04-01 14:42 +0000 [251348cbbb]  Ben Ford <bford@digium.com>
+
+	* build: Revise CHANGES and UPGRADE.txt handling.
+
+	  This changes the way that we handle adding changes to CHANGES and
+	  UPGRADE.txt. The reason for this is because whenever someone needed to
+	  make a change to one of these files and someone else had already done
+	  so, you would run into merge conflicts. With this new setup, there will
+	  never be merge conflicts since all changes will be documented in the
+	  doc/<file>-staging directory. The release script is now responsible for
+	  merging all of these changes into the appropriate files.
+
+	  There is a special format that these files have to follow in order to be
+	  parsed. The files do not need to have a meaningful name, but it is
+	  strongly recommended. For example, if you made a change to pjsip, you
+	  may have something like this "res_pjsip_relative_title", where
+	  "relative_title" is something more descriptive than that. Inside each
+	  file, you will need a subject line for your change, followed by a
+	  description. There can be multiple subject lines. The file may look
+	  something like this:
+
+	     Subject: res_pjsip
+	     Subject: Core
+
+	     A description that explains the changes made and why. The release
+	     script will handle the bulleting and section separators!
+
+	     You can still separate with new lines within your description.
+
+	  The headers ("Subject" and "Master-Only") are case sensative, but the
+	  value for "Master-Only" ("true" or "True") is not.
+
+	  For more information, check out the wiki page:
+	  https://wiki.asterisk.org/wiki/display/AST/CHANGES+and+UPGRADE.txt
+
+	  ASTERISK-28111 #close
+
+	  Change-Id: I19cf4b569321c88155a65e9b0b80f6d58075dd47
+
+2019-04-04 16:02 +0000 [f9bb53a1dd]  Chris-Savinovich <csavinovich@digium.com>
+
+	* config.c: Fix a crash in extconfig parsing
+
+	  When extconfig.conf file is parsed, the code previously searched for
+	  character comma without verifying if error (null or blank).  This caused
+	  a segmentation error.
+
+	  Change-Id: Id76b452d8f330d11c2742c37232761ad71472a8b
+
+2019-04-03 10:55 +0000 [a9a0303544]  Salah Ahmed <txrubel@gmail.com>
+
+	* chan_pjsip: DTMF Mode auto_info fallback lead to both inband and info
+
+	  When the dtmf_mode on an endpoint is configured as "auto_info"
+	  Asterisk will produce an inband DTMF tone alongside an INFO
+	  message when sending DTMF.
+
+	  ASTERISK-28371
+
+	  Change-Id: I1380b82f006e110a1b83fbb50c9873edd13a5d9a
+
+2019-03-21 18:09 +0000 [707897e5f7]  sungtae kim <sungtae@messagebird.com>
+
+	* main/json.c: Added app_name, app_data to channel type
+
+	  It was difficult to check the channel's current application and
+	  parameters using ARI for current channels. Added app_name, app_data
+	  items to show the current application information.
+
+	  ASTERISK-28343
+
+	  Change-Id: Ia48972b3850e5099deab0faeaaf51223a1f2f38c
+
+2019-04-03 17:55 +0000 [b3faf7311a]  George Joseph <gjoseph@digium.com>
+
+	* CI:  Add --no-dev-mode option to buildAsterisk.sh
+
+	  The new option disables dev mode, TEST_FRAMEWORK and
+	  MALLOC_DEBUG making the build more production-like.
+
+	  Change-Id: Ieb72497d4d91d5416684aaed702cc3f532099738
+
+2019-04-03 10:24 +0000 [4853fc2218]  Ben Ford <bford@digium.com>
+
+	* build: Fix compiler warnings/errors.
+
+	  The compiler complained about a couple of variables that weren't
+	  initialized but were being used. Initializing them to NULL resolves the
+	  warnings/errors.
+
+	  ASTERISK-28362 #close
+
+	  Change-Id: I6243afc5459b416edff6bbf571b0489f6b852e4b
+
+2019-03-27 14:30 +0000 [1c7bc63cff]  Matthew Fredrickson <creslin@digium.com>
+
+	* res/res_rtp_asterisk: Enable rxjitter calculation for video
+
+	  It looks like we're not properly calculating jitter values on received
+	  video streams.  This patch enables the code that does jitter calculations
+	  for those streams.
+
+	  Change-Id: Iaac985808829c8f034db8c57318789c4c8c11392
+
+2019-03-02 05:37 +0000 [fb7aa52ae0]  sungtae kim <sungtae@messagebird.com>
+
+	* res/res_ari: Added ARI resource /ari/channels/{channelId}/rtp_statistics
+
+	  Added ARI resource for channel statistics.
+	  GET /ari/channels/{channelId}/rtp_statistics : It returns given
+	  channel's rtp statistics detail.
+
+	  ASTERISK-28320
+
+	  Change-Id: I4343eec070438cec13f2a4f22e7fd9e574381376
+
+2019-03-26 13:07 +0000 [33647ebe2c]  Sean Bright <sean.bright@gmail.com>
+
+	* pjproject: Add timer patch from pjproject r5934
+
+	  ASTERISK-28161 #close
+	  Reported by: Ross Beer
+
+	  Change-Id: I65331d554695753005eaa66c1d5d4807fe9009c8
 
 2019-04-01 14:42 +0000  Asterisk Development Team <asteriskteam@digium.com>
 
