@@ -122,6 +122,7 @@ ASTERISK_FILE_VERSION(__FILE__, "$Revision$")
 #include "asterisk/module.h"
 #include "asterisk/adsi.h"
 #include "asterisk/app.h"
+#include "asterisk/mwi.h"
 #include "asterisk/manager.h"
 #include "asterisk/dsp.h"
 #include "asterisk/localtime.h"
@@ -3794,6 +3795,54 @@ static void check_quota(struct vm_state *vms, char *mailbox) {
 }
 
 #endif /* IMAP_STORAGE */
+
+static void cleanup_orphaned_lock_files(const char *base)
+{
+	DIR *dir;
+	struct dirent *e;
+
+	dir = opendir(base);
+	if (!dir) {
+		/* Don't complain about this too loudly */
+		ast_debug(2, "Unable to open `%s': %s\n", base, strerror(errno));
+		return;
+	}
+
+	while ((e = readdir(dir))) {
+		char *fullpath;
+		struct stat s;
+
+		/* Always skip . and .. */
+		if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, "..")) {
+			continue;
+		}
+
+		/* Build up the full path (using dynamic memory because PATH_MAX is crap) */
+		if (ast_asprintf(&fullpath, "%s/%s", base, e->d_name) == -1) {
+			break;
+		}
+
+		if (lstat(fullpath, &s) < 0) {
+			ast_free(fullpath);
+			continue;
+		}
+
+		/* This is exposing an implementation detail of ast_lock_path, but it makes
+		 * our life a bit easier */
+		if (!strcmp(e->d_name, ".lock") && S_ISLNK(s.st_mode)) {
+			if (!ast_unlock_path(base)) {
+				ast_log(AST_LOG_NOTICE, "Cleaned up orphaned lock file: %s/.lock\n", base);
+			}
+		} else if (S_ISDIR(s.st_mode)) {
+			/* If it is a directory, let's dive down */
+			cleanup_orphaned_lock_files(fullpath);
+		}
+
+		ast_free(fullpath);
+	}
+
+	closedir(dir);
+}
 
 /*! \brief Lock file path
  * only return failure if ast_lock_path returns 'timeout',
@@ -12369,8 +12418,8 @@ static int append_mailbox(const char *context, const char *box, const char *data
 	if (stringp && (s = strsep(&stringp, ","))) {
 		ast_copy_string(vmu->pager, s, sizeof(vmu->pager));
 	}
-	if (stringp && (s = strsep(&stringp, ","))) {
-		apply_options(vmu, s);
+	if (stringp) {
+		apply_options(vmu, stringp);
 	}
 
 	switch (vmu->passwordlocation) {
@@ -15305,6 +15354,9 @@ static int load_module(void)
 
 	/* compute the location of the voicemail spool directory */
 	snprintf(VM_SPOOL_DIR, sizeof(VM_SPOOL_DIR), "%s/voicemail/", ast_config_AST_SPOOL_DIR);
+
+	/* Now that we have a spool directory, clean up old lock files */
+	cleanup_orphaned_lock_files(VM_SPOOL_DIR);
 
 	if (!(mwi_subscription_tps = ast_taskprocessor_get("app_voicemail", 0))) {
 		ast_log(AST_LOG_WARNING, "failed to reference mwi subscription taskprocessor.  MWI will not work\n");
