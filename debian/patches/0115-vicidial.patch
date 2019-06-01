@@ -62,7 +62,7 @@ Index: trunk/apps/app_amd.c
  			/* Figure out how long the frame is in milliseconds */
  			if (f->frametype == AST_FRAME_VOICE) {
  				framelength = (ast_codec_samples_count(f) / DEFAULT_SAMPLES_PER_MS);
-@@ -423,9 +445,15 @@ static void isAnsweringMachine(struct as
+@@ -431,9 +453,15 @@ static void isAnsweringMachine(struct as
  		sprintf(amdCause , "TOOLONG-%d", iTotalTime);
  	}
  

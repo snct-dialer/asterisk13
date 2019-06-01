@@ -40,3 +40,4 @@ build-reproducibly
 #0105-libsrtp-2.1.x.patch
 0110-vicidial.patch
 0115-vicidial.patch
+0120-snctdialer.patch
