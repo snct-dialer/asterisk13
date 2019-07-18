@@ -4,6 +4,8 @@ asterisk (2:13.27.1~se-1) UNRELEASED; urgency=medium
     - debian/control: 
       + Remove libpjproject-dev.
       + Replace libsrtp-dev with libsrtp2-dev.
+  * debian/asterisk.postinst:
+    - Remove scan of /var/spool/asterisk.
 
  -- Jörg Frings-Fürst <debian@jff.email>  Thu, 18 Jul 2019 08:05:35 +0200
 
