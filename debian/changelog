@@ -1,4 +1,10 @@
-asterisk (2:13.27.1~se-1) UNRELEASED; urgency=medium
+asterisk (2:13.27.1~se-2) stretch; urgency=medium
+
+  * Use libpjproject-dev again.
+
+ -- Jörg Frings-Fürst <debian@jff.email>  Sun, 21 Jul 2019 09:40:11 +0200
+
+asterisk (2:13.27.1~se-1) stretch; urgency=medium
 
   * New upstream release.
     - debian/control: 
@@ -7,7 +13,7 @@ asterisk (2:13.27.1~se-1) UNRELEASED; urgency=medium
   * debian/asterisk.postinst:
     - Remove scan of /var/spool/asterisk.
 
- -- Jörg Frings-Fürst <debian@jff.email>  Thu, 18 Jul 2019 08:05:35 +0200
+ -- Jörg Frings-Fürst <debian@jff.email>  Thu, 18 Jul 2019 13:09:10 +0200
 
 asterisk (2:13.27.0~se-1) stretch; urgency=medium
 
