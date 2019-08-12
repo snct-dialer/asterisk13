@@ -1,3 +1,15 @@
+asterisk (2:13.27.1~se-4.buster) buster; urgency=medium
+
+  * Use distribution in release.
+
+ -- Jörg Frings-Fürst <debian@jff.email>  Mon, 22 Jul 2019 18:33:20 +0200
+
+asterisk (2:13.27.1~se-3) stretch; urgency=medium
+
+  * Activate new libpjproject handling
+
+ -- Jörg Frings-Fürst <debian@jff.email>  Mon, 22 Jul 2019 15:09:10 +0200
+
 asterisk (2:13.27.1~se-2) stretch; urgency=medium
 
   * Use libpjproject-dev again.
