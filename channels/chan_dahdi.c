@@ -1849,8 +1849,8 @@ static void publish_dahdichannel(struct ast_channel *chan, ast_group_t group, in
 
 	ast_assert(dahdi_channel != NULL);
 
-	blob = ast_json_pack("{s: i, s: i, s: s}",
-		"group", group,
+	blob = ast_json_pack("{s: I, s: i, s: s}",
+		"group", (ast_json_int_t)group,
 		"span", span,
 		"channel", dahdi_channel);
 	if (!blob) {
@@ -7740,8 +7740,16 @@ static struct ast_frame *dahdi_handle_event(struct ast_channel *ast)
 				c++;
 			else
 				c = p->dialdest;
-			if (*c) snprintf(p->dop.dialstr, sizeof(p->dop.dialstr), "M*0%s#", c);
-			else ast_copy_string(p->dop.dialstr,"M*2#", sizeof(p->dop.dialstr));
+
+			if (*c) {
+				int numchars = snprintf(p->dop.dialstr, sizeof(p->dop.dialstr), "M*0%s#", c);
+				if (numchars >= sizeof(p->dop.dialstr)) {
+					ast_log(LOG_WARNING, "Dial string '%s' truncated\n", c);
+				}
+			} else {
+				ast_copy_string(p->dop.dialstr,"M*2#", sizeof(p->dop.dialstr));
+			}
+
 			if (strlen(p->dop.dialstr) > 4) {
 				memset(p->echorest, 'w', sizeof(p->echorest) - 1);
 				strcpy(p->echorest + (p->echotraining / 401) + 1, p->dop.dialstr + strlen(p->dop.dialstr) - 2);
