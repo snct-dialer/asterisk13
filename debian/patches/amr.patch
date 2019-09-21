@@ -541,7 +541,7 @@ Index: trunk/configure.ac
  AST_EXT_LIB_SETUP([BFD], [Debug symbol decoding], [bfd])
  
  # BKTR is used for backtrace support on platforms that do not
-@@ -1538,6 +1541,10 @@ fi
+@@ -1539,6 +1542,10 @@ fi
  
  AST_EXT_LIB_CHECK([ALSA], [asound], [snd_pcm_open], [alsa/asoundlib.h])
  
