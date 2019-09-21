@@ -55,7 +55,7 @@ Index: trunk/apps/app_amd.c
 +                        break;
 +                }
 +
- 		if (f->frametype == AST_FRAME_VOICE || f->frametype == AST_FRAME_CNG) {
+ 		if (f->frametype == AST_FRAME_VOICE || f->frametype == AST_FRAME_NULL || f->frametype == AST_FRAME_CNG) {
 +			/* keep track of the number of audio frames we get */
 +			audioFrameCount++;
 +

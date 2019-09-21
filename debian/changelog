@@ -1,3 +1,44 @@
+asterisk (2:13.28.1~se-1.buster) buster; urgency=medium
+
+  * New upstream release.
+
+ -- Jörg Frings-Fürst <debian@jff.email>  Sat, 21 Sep 2019 10:11:14 +0200
+
+asterisk (2:13.28.0~se-1.buster) buster; urgency=medium
+
+  * New upstream release.
+
+ -- Jörg Frings-Fürst <debian@jff.email>  Tue, 13 Aug 2019 17:08:47 +0200
+
+asterisk (2:13.27.1~se-4.buster) buster; urgency=medium
+
+  * Use distribution in release.
+
+ -- Jörg Frings-Fürst <debian@jff.email>  Mon, 22 Jul 2019 18:33:20 +0200
+
+asterisk (2:13.27.1~se-3) stretch; urgency=medium
+
+  * Activate new libpjproject handling
+
+ -- Jörg Frings-Fürst <debian@jff.email>  Mon, 22 Jul 2019 15:09:10 +0200
+
+asterisk (2:13.27.1~se-2) stretch; urgency=medium
+
+  * Use libpjproject-dev again.
+
+ -- Jörg Frings-Fürst <debian@jff.email>  Sun, 21 Jul 2019 09:40:11 +0200
+
+asterisk (2:13.27.1~se-1) stretch; urgency=medium
+
+  * New upstream release.
+    - debian/control: 
+      + Remove libpjproject-dev.
+      + Replace libsrtp-dev with libsrtp2-dev.
+  * debian/asterisk.postinst:
+    - Remove scan of /var/spool/asterisk.
+
+ -- Jörg Frings-Fürst <debian@jff.email>  Thu, 18 Jul 2019 13:09:10 +0200
+
 asterisk (2:13.27.0~se-1) stretch; urgency=medium
 
   * New upstream release.
