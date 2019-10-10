@@ -20,6 +20,8 @@ if (env.TIMEOUT_DAILIES) {
 
 pipeline {
 	options {
+		ansiColor('gnome-terminal')
+		throttle(['asterisk-daily'])
 		timestamps()
 		timeout(time: timeoutTime, unit: timeoutUnits)
 	}
@@ -29,7 +31,7 @@ pipeline {
 
 	agent {
 		/* All of the stages need to be performed on a docker host */
-		label "swdev-docker"
+		label "asterisk-daily"
 	}
 
 	stages {
@@ -41,7 +43,7 @@ pipeline {
 
 					stage ("Checkout") {
 						sh "sudo chown -R jenkins:users ."
-						sh "printenv | sort"
+						sh "printenv -0 | sort -z | tr '\\0' '\\n'"
 						sh "sudo tests/CI/setupJenkinsEnvironment.sh"
 					}
 
@@ -157,8 +159,7 @@ pipeline {
 	}
 	post {
 		cleanup {
-			sh "sudo make distclean >/dev/null 2>&1 || : "
-			sh "sudo rm -rf tests/CI/output >/dev/null 2>&1 || : "
+            cleanWs deleteDirs: true, notFailBuild: true
 		}
 		success {
 			echo "Reporting ${currentBuild.currentResult} Passed"

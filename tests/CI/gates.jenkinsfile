@@ -20,6 +20,8 @@ if (env.TIMEOUT_GATES) {
 
 pipeline {
 	options {
+		ansiColor('gnome-terminal')
+		throttle(['asterisk-gate'])
 		timestamps()
 		timeout(time: timeoutTime, unit: timeoutUnits)
 	}
@@ -54,22 +56,23 @@ pipeline {
 				onUnstable: false
 			]
 	}
-	
+
 	agent {
 		/* All of the stages need to be performed on a docker host */
-		label "swdev-docker"
+		label "asterisk-gate"
 	}
 
 	stages {
 		stage ("->") {
-			/*
-			 * Jenkins will try to automatically rebuild this job when
-			 * the jenkinsfile changes but since this job is dependent on
-			 * Gerrit, we really don't want to do anything in that case.
-			 */
 			when {
+				/*
+				 * Jenkins will try to automatically rebuild this job when
+				 * the jenkinsfile changes but since this job is dependent on
+				 * Gerrit, we really don't want to do anything in that case.
+				 */
 				not { environment name: 'GERRIT_CHANGE_NUMBER', value: '' }
-				not { environment name: 'GERRIT_EVENT_ACCOUNT_NAME', value: 'Jenkins2' }
+				/* If "skip_gate" is in the comments, don't run the job */
+				not { expression { env.GERRIT_EVENT_COMMENT_TEXT ==~ /.*skip_gate.*/ } }
 			}
 			steps {
 				/* Here's where we switch to scripted pipeline */
@@ -78,9 +81,9 @@ pipeline {
 					manager.createSummary("/plugin/workflow-job/images/48x48/pipelinejob.png").appendText("Docker Host: ${NODE_NAME}", false)
 
 					stage ("Checkout") {
-						sh "sudo chown -R jenkins:users ."  
+						sh "sudo chown -R jenkins:users ."
 						env.GERRIT_PROJECT_URL = env.GIT_URL.replaceAll(/[^\/]+$/, env.GERRIT_PROJECT)
-					
+
 						/*
 						 * Jenkins has already automatically checked out the base branch
 						 * for this change but we now need to check out the change itself
@@ -97,7 +100,7 @@ pipeline {
 						withCredentials([usernamePassword(credentialsId: "${JENKINS_GERRIT_CREDS}",
 							passwordVariable: 'GERRIT_USER_PW', usernameVariable: 'GERRIT_USER_NAME')]) {
 
-							sh "printenv | sort"
+							sh "printenv -0 | sort -z | tr '\\0' '\\n'"
 
 							checkout scm: [$class: 'GitSCM',
 								branches: [[name: env.GERRIT_BRANCH ]],
@@ -191,7 +194,7 @@ pipeline {
 									}
 
 									sh "sudo rm -rf ${groupDir} || : "
-									
+
 									withCredentials([usernamePassword(credentialsId: "${JENKINS_GERRIT_CREDS}",
 										passwordVariable: 'GERRIT_USER_PW', usernameVariable: 'GERRIT_USER_NAME')]) {
 										checkout scm: [$class: 'GitSCM',
@@ -237,8 +240,7 @@ pipeline {
 	}
 	post {
 		cleanup {
-			sh "sudo make distclean >/dev/null 2>&1 || : "
-			sh "sudo rm -rf tests/CI/output >/dev/null 2>&1 || : "
+            cleanWs deleteDirs: true, notFailBuild: true
 		}
 		/*
 		 * The Gerrit Trigger will automatically post the "Verified" results back
