@@ -1,8 +1,165 @@
-2019-09-05 13:07 +0000  Asterisk Development Team <asteriskteam@digium.com>
+2019-10-08 17:10 +0000  Asterisk Development Team <asteriskteam@digium.com>
 
-	* asterisk 13.28.1 Released.
+	* asterisk 13.29.0 Released.
 
-2019-08-26 07:53 +0000 [647744fb75]  Joshua Colp <jcolp@digium.com>
+2019-09-25 17:48 +0000  Asterisk Development Team <asteriskteam@digium.com>
+
+	* asterisk 13.29.0-rc2 Released.
+
+2019-09-19 09:50 +0000 [910b98df04]  George Joseph <gjoseph@digium.com>
+
+	* pjproject_bundled:  Revert pjproject 2.9 commits causing leaks
+
+	  We've found a connection re-use regression in pjproject 2.9
+	  introduced by commit
+	  "Close #1019: Support for multiple listeners."
+	  https://trac.pjsip.org/repos/changeset/6002
+	  https://trac.pjsip.org/repos/ticket/1019
+
+	  Normally, multiple SSL requests should reuse the same connection
+	  if one already exists to the remote server.  When a transport
+	  error occurs, the next request should establish a new connection
+	  and any following requests should use that same one.  With this
+	  patch, when a transport error occurs, every new request creates
+	  a new connection so you can wind up with thousands of open tcp
+	  sockets, possibly exhausting file handles, and increasing memory
+	  usage.
+
+	  Reverting pjproject commit 6002 (and related 6021) restores the
+	  expected behavior.
+
+	  We also found a memory leak in SSL processing that was introduced by
+	  commit
+	  "Fixed #2204: Add OpenSSL remote certificate chain info"
+	  https://trac.pjsip.org/repos/changeset/6014
+	  https://trac.pjsip.org/repos/ticket/2204
+
+	  Apparently the remote certificate chain is continually recreated
+	  causing the leak.
+
+	  Reverting pjproject commit 6014 (and related 6022) restores the
+	  expected behavior.
+
+	  Both of these issues have been acknowledged by Teluu.
+
+	  ASTERISK-28521
+
+	  Change-Id: I8ae7233c3ac4ec29a3b991f738e655dabcaba9f1
+
+2019-09-23 11:01 +0000 [e818841bad]  Kevin Harwell <kharwell@digium.com>
+
+	* res_sorcery_memory_cache: stale item update leak
+
+	  When a stale item was being updated the object was being retrieved, but its
+	  reference was not being decremented after the update. This patch makes it so
+	  the object is now appropriately de-referenced.
+
+	  ASTERISK-28523
+
+	  Change-Id: I9d8173d3a0416a242f4eba92fa0853279c500ec7
+
+2019-09-15 14:35 +0000 [75da335ac4]  Joshua Colp <jcolp@digium.com>
+
+	* chan_pjsip: Relock correct channel during "fax" redirect.
+
+	  When fax detection occurs on an outbound PJSIP channel the
+	  redirect operation will result in a masquerade occurring and
+	  the underlying channel on the session changing. The code
+	  incorrectly relocked the new channel instead of the old
+	  channel when returning. This resulted in the new channel
+	  being locked indefinitely. The code now always acts on the
+	  expected channel.
+
+	  ASTERISK-28538
+
+	  Change-Id: I2b2e60d07e74383ae7e90d752c036c4b02d6b3a3
+
+2019-09-14 10:05 +0000 [90bd2e22e8]  Guido Falsi <madpilot@FreeBSD.org>
+
+	* chan_dahdi: Fix build with clang/llvm
+
+	  On FreeBSD using the clang/llvm compiler build fails to build due
+	  to the switch statement argument being a non integer type expression.
+	  Switch to an if/else if/else construct to sidestep the issue.
+
+	  ASTERISK-28536 #close
+
+	  Change-Id: Idf4a82cc1e94580a2d017fe9e351c226f23e20c8
+
+2019-09-12 20:29 +0000  Asterisk Development Team <asteriskteam@digium.com>
+
+	* asterisk 13.29.0-rc1 Released.
+
+2019-09-12 15:20 +0000 [18fbd8d8c3]  Asterisk Development Team <asteriskteam@digium.com>
+
+	* Update CHANGES and UPGRADE.txt for 13.29.0
+2019-09-12 13:36 +0000 [2a7cec9051]  Asterisk Development Team <asteriskteam@digium.com>
+
+	* Update CHANGES and UPGRADE.txt for 13.29.0
+2019-08-27 17:44 +0000 [2705652152]  sungtae kim <pchero21@gmail.com>
+
+	* res_musiconhold: Added unregister realtime moh class
+
+	  This fix allows a realtime moh class to be unregistered from the command
+	  line. This is useful when the contents of a directory referenced by a
+	  realtime moh class have changed.
+	  The realtime moh class is then reloaded on the next request and uses the
+	  new directory contents.
+
+	  ASTERISK-17808
+
+	  Change-Id: Ibc4c6834592257c4bb90601ee299682d15befbce
+
+2019-09-05 11:09 +0000 [9462722b17]  Frederic LE FOLL <frederic.lefoll@c-s.fr>
+
+	* ChanIsAvail() generates a CDR when unanswered=yes in cdr.conf.
+
+	  ChanIsAvail() creates a temporary channel with ast_request() to test
+	  resource availability. It should not generate a CDR when it hangs up
+	  this temporary channel.
+
+	  This patch disables CDR generation for the temporary channel with
+	  ast_cdr_set_property().
+
+	  ASTERISK-28527
+
+	  Change-Id: I7b0555c6909c7d322e452dde97c9ea5b111552d1
+
+2019-09-05 10:52 +0000 [2b563368df]  Frederic LE FOLL <frederic.lefoll@c-s.fr>
+
+	* chan_dahdi: set CHANNEL(hangupsource) when a PRI channel hangs up
+
+	  When the remote ISDN party ends an ISDN call on a PRI link
+	  (DISCONNECT), CHANNEL(hangupsource) information is not available.
+
+	  chan_dahdi already contains an ast_set_hangupsource() in
+	  __dahdi_exception() function but it seems that ISDN message processing
+	  does not use this part of code.
+
+	  Two other channel modules associate ast_queue_hangup() and
+	  ast_set_hangupsource() functions calls:
+	  - chan_pjsip in chan_pjsip_session_end() function,
+	  - chan_sip in sip_queue_hangup_cause() function.
+	  chan_iax2 separates them, in iax2_queue_hangup()/iax2_destroy() and
+	  set_hangup_source_and_cause().
+
+	  Thus, I propose to add ast_set_hangupsource() beside
+	  ast_queue_hangup() in sig_pri_queue_hangup(), like chan_pjsip and
+	  chan_sip already do.
+
+	  ASTERISK-28525
+
+	  Change-Id: I0f588a4bcf15ccd0648fd69830d1b801c3f21b7c
+
+2019-09-08 10:38 +0000 [060495ed86]  Sean Bright <sean.bright@gmail.com>
+
+	* codec_resample: Ensure OUTSIDE_SPEEX is defined when necessary
+
+	  ASTERISK-28511
+
+	  Change-Id: If0d58598ce14aad3c786a1c0127b5f7b200b737d
+
+2019-08-26 07:53 +0000 [c711546559]  Joshua Colp <jcolp@digium.com>
 
 	* AST-2019-005 - translate: Don't assume all frames will have a src.
 
@@ -20,9 +177,540 @@
 
 	  Change-Id: I024d10dd98207eb8a6b35b59880bcdf1090538f8
 
-2019-07-25 09:35 +0000  Asterisk Development Team <asteriskteam@digium.com>
+2019-08-27 06:10 +0000 [8e07fcc30d]  Igor Goncharovsky <igor.goncharovsky@gmail.com>
 
-	* asterisk 13.28.0 Released.
+	* chan_unistim: Fix clang warning: variable sized type not at end of a struct
+
+	  On reading information about initial client packet unistim use dirty
+	  implementation of destination ip address retrieval. This fix uses
+	  CMSG_*(..) to get ip address and make clang compile without warning.
+
+	  ASTERISK-25592 #close
+	  Reported-by: Alexander Traud
+
+	  Change-Id: Ic1fd34c2c2bcc951da65bf62e3f7a8adff8351b1
+
+2019-08-23 16:24 +0000 [af12d36f7e]  Kevin Harwell <kharwell@digium.com>
+
+	* res_pjsip_mwi: add better handling of solicited vs unsolicited subscriptions
+
+	  res_pjsip_mwi allows both solicited and unsolicited MWI subscription types.
+	  While both can be set in the configuration for a given endpoint/aor, only
+	  one is allowed. Precedence is given to unsolicited. Meaning if an endpoint/aor
+	  is configured to allow both types then the solicited subscription is rejected
+	  when it comes in. However, there is a configuration option to override that
+	  behavior:
+
+	  mwi_subscribe_replaces_unsolicited
+
+	  When set to "yes" then when a solicited subscription comes in instead of
+	  rejecting it Asterisk is suppose to replace the unsolicited one if it exists.
+	  Prior to this patch there was a bug in Asterisk that allowed the solicted one
+	  to be added, but did not remove the unsolicited. As a matter of fact a new
+	  unsolicited subscription got added everytime a SIP register was received.
+	  Over time this eventually could "flood" a phone with SIP notifies.
+
+	  This patch fixes that behavior to now make it work as expected. If configured
+	  to do so a solicited subscription now properly replaces the unsolicited one.
+	  As well when an unsubscribe is received the unsolicited subscription is
+	  restored. Logic was also put in to handle reloads, and any configuration changes
+	  that might result from that. For instance, if a solicited subscription had
+	  previously replaced an unsolicited one, but after reload it was configured to
+	  not allow that then the solicited one needs to be shutdown, and the unsolicited
+	  one added.
+
+	  ASTERISK-28488
+
+	  Change-Id: Iec2ec12d9431097e97ed5f37119963aee41af7b1
+
+2019-08-27 00:49 +0000 [7f1a574ce7]  Igor Goncharovsky <igor.goncharovsky@gmail.com>
+
+	* chan_unistim: Fix code, causing all incoming DTMF sent back to asterisk
+
+	  Current implementation of ast_channel_tech send_digit_begin hook uses
+	  same function for tone playback as key press handler. This cause every
+	  incoming dtmf send back to asterisk. In case of two unistim phones
+	  connected to each other, it'll cause indefinite DTMF loop. Fix add
+	  separate function for dtmf tone phone play.
+
+	  Change-Id: I5795db468df552f0c89c7576b6b3858b26c4eab4
+
+2019-08-16 06:01 +0000 [b003c9b3ae]  Igor Goncharovsky <igor.goncharovsky@gmail.com>
+
+	* chan_unistim: Fix RTP port byte order for big-endian arch
+
+	  This patch fixes one-way oudio that users expirienced on
+	  big-endian architechtires. RTP port number bytes was stored
+	  in improper order and phone sent RTP to wrong RTP port.
+
+	  Reported-by: Andrey Ionov
+	  Change-Id: I9a9ca7f26e31a67bbbceff12923baa10dfb8a3be
+
+2019-08-23 15:14 +0000 [5154e7f359]  Sean Bright <sean.bright@gmail.com>
+
+	* codec_resample: Upgrade speex_resample to fix up-sampling bug
+
+	  ASTERISK-28511 #close
+
+	  Change-Id: Idd07bf341e89ac999c7f5701d9b72b8a9cb11e82
+
+2019-08-22 13:19 +0000 [e6a4cca4aa]  Alexei Gradinari <alex2grad@gmail.com>
+
+	* Fix misname 'res_external_mwi' to 'res_mwi_external' in comments.
+
+	  Change-Id: Ic784be8500e5cb75dcb34bae9f03cfd93b6b34fb
+
+2019-08-21 10:58 +0000 [1a86b2499a]  Dan Cropp <dan@amtelco.com>
+
+	* pjproject: Configurable setting for cnonce to include hyphens or not
+
+	  NEC SIP Station interface with authenticated registration only supports cnonce
+	  up to 32 characters.  In Linux, PJSIP would generate 36 character cnonce
+	  which included hyphens.  Teluu developed this patch adding a compile time
+	  setting to default to not include the hyphens.  They felt it best to still
+	  generate the UUID and strip the hyphens.
+	  They have indicated it will be part of PJSIP 2.10.
+
+	  ASTERISK-28509
+	  Reported-by: Dan Cropp
+
+	  Change-Id: Ibdfcf845d4f8c0a14df09fd983b11f2d72c5f470
+
+2019-07-30 12:08 +0000 [06e5c11589]  Stas Kobzar <stas@modulis.ca>
+
+	* res_pjsip: Channel variable SIPFROMDOMAIN
+
+	  In chan_sip, there was variable SIPFROMDOMAIN that allows to set
+	  From header URI domain per channel. This patch introduces res_pjsip
+	  variable SIPFROMDOMAIN for backward compatibility with chan_sip.
+
+	  ASTERISK-28489
+
+	  Change-Id: I715133e43172ce2a1e82093538dc39f9e99e5f2e
+
+2019-08-20 13:04 +0000 [22372d5d2b]  George Joseph <gjoseph@digium.com>
+
+	* res_ari.c:  Prefer exact handler match over wildcard
+
+	  Given the following request path and 2 handler paths...
+	  Request: /channels/externalMedia
+	  Handler: /channels/{channelId}      "wildcard"
+	  Handler: /channels/externalmedia    "non-wildcard"
+
+	  ...if /channels/externalMedia was registered as a handler after
+	  /channels/{channelId} as shown above, the request would automatically
+	  match the wildcard handler and attempt to parse "externalMedia" into
+	  the channelId variable which isn't what was intended.  It'd work
+	  if the non-wildard entry was defined in rest-api/api-docs/channels.json
+	  before the wildcard entry but that makes the json files
+	  order-dependent which isn't a good thing.
+
+	  To combat this issue, the search loop saves any wildcard match but
+	  continues looking for exact matches at the same level.  If it finds
+	  one, it's used.  If it hasn't found an exact match at the end of
+	  the current level, the wildcard is used.  Regardless, after
+	  searching the current level, the wildcard is cleared so it won't
+	  accidentally match for a different object or a higher level.
+
+	  BTW, it's currently not possible for more than 1 wildcard entry
+	  to be defined for a level.  For instance, there couldn't be:
+	  Handler: /channels/{channelId}
+	  Handler: /channels/{channelName}
+	  We wouldn't know which one to match.
+
+	  Change-Id: I574aa3cbe4249c92c30f74b9b40e750e9002f925
+
+2019-08-09 15:53 +0000 [ddc64ca059]  Sean Bright <sean.bright@gmail.com>
+
+	* audiohook.c: Substitute silence for unavailable audio frames
+
+	  There are 4 scenarios to consider when capturing audio from a channel
+	  with an audiohook:
+
+	   1. There is no rx and no tx audio, so return nothing.
+	   2. There is rx but no tx audio, so return rx.
+	   3. There is tx but no rx audio, so return tx.
+	   4. There is rx and tx audio, so mix them and return.
+
+	  The file passed as the primary argument to MixMonitor will be written to
+	  in scenarios 2, 3, and 4. However, if you pass the r() and t() options
+	  to MixMonitor, a frame will only be written to the r() file if there was
+	  rx audio and a frame will only be written to the t() file if there was
+	  tx audio.
+
+	  If you subsequently take the r() and t() files and try to mix them, the
+	  sides of the conversation will 'drift' and be non-representative of the
+	  user experience.
+
+	  This patch adds a new 'S' option to MixMonitor that injects a frame of
+	  silence on either the r() side or the t() side of the channel so that
+	  when later mixed, there is no such drift.
+
+	  Change-Id: Ibf5ed73a811087727bd561a89a59f4447b4ee20e
+
+2019-08-14 14:52 +0000 [16bc4ed93c]  Alexei Gradinari <alex2grad@gmail.com>
+
+	* app_voicemail/IMAP: check mailstream not NULL in leave_voicemail
+
+	  The function leave_voicemail checks if expungeonhangup is set,
+	  but does not check if IMAP stream is closed,
+	  so it could call imap function with NULL stream.
+	  This leads to segfault.
+
+	  ASTERISK-28505 #close
+
+	  Change-Id: Ib66c57c1f1ba97774e447b36349198e2626a8d7c
+
+2019-08-09 05:51 +0000 [8a96746994]  Sean Bright <sean.bright@gmail.com>
+
+	* menuselect: Fix curses build on Gentoo Linux
+
+	  Because keypad() is exported by libtinfo, it needs to be explicitly
+	  added to the linker options.
+
+	  ASTERISK-28487 #close
+
+	  Change-Id: I6c2ad5b95f422c263d078b5c0e84c111807dffc6
+
+2019-08-08 12:10 +0000 [c6558e09af]  George Joseph <gjoseph@digium.com>
+
+	* CI: Escape backslashes in printenv/sort/tr
+
+	  Change-Id: I52be64c8f6af2bbe15148a856d1f10cb113e1e94
+
+2019-08-07 17:54 +0000 [feaadbd250]  Kevin Harwell <kharwell@digium.com>
+
+	* srtp: Fix possible race condition, and add NULL checks
+
+	  Somehow it's possible for the srtp session object to be NULL even though the
+	  Asterisk srtp object itself is valid. When this happened it would cause a
+	  crash down in the srtp code when attempting to protect or unprotect data.
+
+	  After looking at the code there is at least one spot that makes this situation
+	  possible. If Asterisk fails to unprotect the data, and after several retries
+	  it still can't then the srtp->session gets freed, and set to NULL while still
+	  leaving the Asterisk srtp object around. However, according to the original
+	  issue reporter this does not appear to be their situation since they found
+	  no errors logged stating the above happened (which Asterisk does for that
+	  situation).
+
+	  An issue was found however, where a possible race condition could occur between
+	  the pjsip incoming negotiation, and the receiving of RTP packets. Both places
+	  could attempt to create/setup srtp for the same rtp instance at the same time.
+	  This potentially could be the cause of the problem as well.
+
+	  Given the above this patch adds locking around srtp setup for a given rtp, or
+	  rtcp instance. NULL checks for the session have also been added within the
+	  protect and unprotect functions as a precaution. These checks should at least
+	  stop Asterisk from crashing if it gets in this situation again.
+
+	  This patch also fixes one other issue noticed during investigation. When doing
+	  a replace the old object was freed before creating the replacement. If the new
+	  replacement object failed to create then the rtp/rtcp instance would now point
+	  to freed srtp data which could potentially cause a crash as well when the next
+	  attempt to reference it was made. This is now fixed so the old srtp object is
+	  kept upon replacement failure.
+
+	  Lastly, more logging has been added to help diagnose future issues.
+
+	  ASTERISK-28472
+
+	  Change-Id: I240e11cbb1e9ea8083d59d50db069891228fe5cc
+
+2019-08-08 07:12 +0000 [17908cb76e]  George Joseph <gjoseph@digium.com>
+
+	* CI:  Add "throttle" label and "skip_gate" capability
+
+	  To make throttling by label fully active, the "throttle" option
+	  has to be specified with a specific label.
+
+	  You can now specify "skip_gate" in the Gerrit comments when you
+	  do a +2 code review to tell Jenkins not to actually run the
+	  gate.  You'd do this if you plan to manually merge the change.
+
+	  Also updated the "printenv" debug output to better sort multi-line
+	  comments.
+
+	  Change-Id: I4c0b1085acec4805f2ca207eebac50aad81f27e2
+
+2019-08-05 07:23 +0000 [1496aef51b]  Joshua Colp <jcolp@digium.com>
+
+	* cdr / cel: Use event time at event creation instead of processing.
+
+	  When updating times on CDR or CEL records using the time at which
+	  it is done can result in times being incorrect if the system is
+	  heavily loaded and stasis message processing is delayed.
+
+	  This change instead makes it so CDR and CEL use the time at which
+	  the stasis messages that drive the systems are created. This allows
+	  them to be backed up while still producing correct records.
+
+	  ASTERISK-28498
+
+	  Change-Id: I6829227e67aefa318efe5e183a94d4a1b4e8500a
+
+2019-08-06 10:40 +0000 [1a051fcf5a]  George Joseph <gjoseph@digium.com>
+
+	* CI:  Make node labels job-specific
+
+	  Originally, the eligible nodes for a job were labelled only by
+	  "swdev-docker".  So basically any node could run any job.  We had
+	  found that allowing a node to run more than 1 gate at a time was
+	  problematic so we limited the nodes to processing 1 job at a time.
+	  With the creation of the Asterisk 17 branches however, we now have
+	  so many active branches that getting checks and gates through in
+	  a timely manner is problematic when a node can run only 1 job
+	  at a time.
+
+	  Now the nodes are also labelled by the job type they can run.
+	  For instance: "asterisk-check", "asterisk-gate", etc.  With the
+	  "Throttle Concurrent Builds" plugin, we can now allow a node to
+	  run more than 1 job BUT throttle by job type.  For instance:
+	    Allow 2 jobs but only 1 asterisk-gate at a time.
+	  Now a node can run 2 checks or 1 check and 1 gate or 1 gate but
+	  not 2 gates at a time.
+
+	  Change-Id: I2032bf6afbcec5c341d9b852214c0c812d3d6db5
+
+2019-07-17 07:35 +0000 [6f77e12f21]  Torrey Searle <torrey@voxbone.com>
+
+	* main/udptl.c: correctly handle udptl sequence wrap around
+
+	  incorrect handling of UDPTL squence number wrap arounds causes
+	  loss of packets every time the wrap around occurs
+
+	  ASTERISK-28483 #close
+
+	  Change-Id: I33caeb2bf13c574a1ebb81714b58907091d64234
+
+2019-08-01 16:22 +0000 [f145b58542]  Kevin Harwell <kharwell@digium.com>
+
+	* various modules: json integer overflow
+
+	  There were still a few places in the code that could overflow when "packing"
+	  a json object with a value outside the base type integer's range. For instance:
+
+	  unsigned int value = INT_MAX + 1
+	  ast_json_pack("{s: i}", value);
+
+	  would result in a negative number being "packed". In those situations this patch
+	  alters those values to a ast_json_int_t, which widens the value up to a long or
+	  long long.
+
+	  ASTERISK-28480
+
+	  Change-Id: Ied530780d83e6f1772adba0e28d8938ef30c49a1
+
+2019-07-29 10:15 +0000 [bb74c691ce]  Sean Bright <sean.bright@gmail.com>
+
+	* res_musiconhold: Use a vector instead of custom array allocation
+
+	  Change-Id: Ic476a56608b1820ca93dcf68d10cd76fc0b94141
+
+2019-08-01 05:07 +0000 [c6a34ddbf4]  Joshua Colp <jcolp@digium.com>
+
+	* res_pjsip: Fix multiple of the same contact in "pjsip show contacts".
+
+	  The code for gathering contacts could result in the same contact
+	  being retrieved and added to the list multiple times. The container
+	  which stores the contacts to display will now only allow a contact
+	  to be added to it once instead of multiple times.
+
+	  ASTERISK-28228
+
+	  Change-Id: I805185cfcec03340f57d2b9e6cc43c49401812df
+
+2019-07-24 15:12 +0000 [5096a5ddf7]  Sean Bright <sean.bright@gmail.com>
+
+	* manager: Send fewer packets
+
+	  The functions that build manager message headers do so in a way that
+	  results in a single messages being split across multiple packets. While
+	  this doesn't matter to the remote end, it makes network captures noisier
+	  and harder to follow, and also means additional system calls.
+
+	  With this patch, we build up more of the message content into the TLS
+	  buffer before flushing to the network. This change is completely
+	  internal to the manager code and does not affect any of the existing
+	  API's consumers.
+
+	  Change-Id: I50128b0769060ca5272dbbb5e60242d131eaddf9
+
+2019-07-29 10:04 +0000 [2982138d2b]  Sean Bright <sean.bright@gmail.com>
+
+	* res_musiconhold: Use ast_pipe_nonblock() wrapper
+
+	  Change-Id: Ib0a4b41e5ececbe633079e2d8c2b66c031d2d1f2
+
+2019-07-24 15:15 +0000 [e51e2cae58]  George Joseph <gjoseph@digium.com>
+
+	* CI:  Don't enable non-core modules in Certified branches
+
+	  We don't support non-core modules for Certified releases but we
+	  were enabling them for CI builds which was causing lots of test
+	  failures.  Now we don't.
+
+	  Change-Id: I0b3254c08a2479f3d39151690350cce5ce5ad766
+
+2019-05-12 13:29 +0000 [8e09fbb4e9]  Leonid Fainshtein <leonid.fainshtein@xorcom.com>
+
+	* openr2(6/6): Set hangup cause
+
+	  Change-Id: I94dc38920e6e77cc73062648f62fdd613d0d1452
+	  Signed-off-by: Oron Peled <oron.peled@xorcom.com>
+
+2019-04-22 14:14 +0000 [fdaefbb20a]  Tzafrir Cohen <tzafrir.cohen@xorcom.com>
+
+	* openr2(5/6): added cli command -- mfcr2 destroy link <index>
+
+	  Change-Id: I452d6a853bcd8c6e194455b19e5e017713e9c0fe
+	  Signed-off-by: Oron Peled <oron.peled@xorcom.com>
+
+2019-04-22 10:27 +0000 [effca9917d]  Tzafrir Cohen <tzafrir.cohen@xorcom.com>
+
+	* openr2(4/6): added new cli command -- mfcr2 show links
+
+	  * This command show the MFC/R2 links
+
+	  Change-Id: I213822e1b7ef9c05bd89a2ba62df8e0856ce9f84
+	  Signed-off-by: Oron Peled <oron.peled@xorcom.com>
+
+2019-04-22 07:27 +0000 [b3de2c0e1e]  Tzafrir Cohen <tzafrir.cohen@xorcom.com>
+
+	* openr2(3/6): Convert r2links to standard Asterisk AST_LIST*
+
+	  Change-Id: Ibcb2401515a58782a1488c0b9efbed201c3f3a17
+	  Signed-off-by: Oron Peled <oron.peled@xorcom.com>
+
+2019-04-22 07:33 +0000 [4b779a59e4]  Tzafrir Cohen <tzafrir.cohen@xorcom.com>
+
+	* openr2(2/6): Stop polling channels when DAHDI returns -ENODEV (e.g: plug-out)
+
+	  Otherwise, OpenR2 threads go crazy and consume almost all CPU resources
+
+	  Change-Id: I10a41f617613fe7399c5bdced5c64a2751173f28
+	  Signed-off-by: Oron Peled <oron.peled@xorcom.com>
+
+2019-07-23 12:58 +0000 [202fdc88dd]  Sean Bright <sean.bright@gmail.com>
+
+	* res_config_sqlite3: Only join threads that we started
+
+	  ASTERISK-28477 #close
+	  Reported by: Dennis
+
+	  ASTERISK-28478 #close
+	  Reported by: Dennis
+
+	  Change-Id: I77347ad46a86dc5b35ed68270cee56acefb4f475
+
+2019-07-19 11:20 +0000 [b63425f469]  George Joseph <gjoseph@digium.com>
+
+	* CI: Add cleanWs to cleanup steps in jenkinsfiles
+
+	  We're at the point where there are enough Jenkins jobs for
+	  Asterisk branches than even cleaned checkouts of Asterisk
+	  will add up to more disk space than is available on the
+	  in-memory workspace mount.  Since we archive all relevent
+	  artifacts anyway, there's no need to keep the workspace
+	  around after the job finishes, whether it succeeds or fails.
+
+	  Change-Id: I1cd3b73ebb045a987df0f62526d152a510210c39
+
+2019-07-04 19:46 +0000 [5c87fa6a0e]  Rodrigo Ramírez Norambuena <a@rodrigoramirez.com>
+
+	* README.md: Update year
+
+	  Change-Id: I746fb94d112c7d797e206bca0fd1e13fcd26bae3
+
+2019-07-19 08:38 +0000 [51504432a7]  George Joseph <gjoseph@digium.com>
+
+	* CI:  Add install-headers to the install make targets
+
+	  The testsuite actually needs the headers installed to run
+	  it's self_test.
+
+	  Change-Id: Ice41d331131b876ad4a9c056085fe6aac34b32b2
+
+2019-07-17 08:06 +0000 [3449240130]  Walter Doekes <walter+asterisk@wjd.nu>
+
+	* sched: Don't allow ast_sched_del to deadlock ast_sched_runq from same thread
+
+	  When fixing ASTERISK~24212, a change was done so a scheduled callback could not
+	  be removed while it was running. The caller of ast_sched_del would have to wait.
+
+	  However, when the caller of ast_sched_del is the callback itself (however wrong
+	  this might be), this new check would cause a deadlock: it would wait forever
+	  for itself.
+
+	  This changeset introduces an additional check: if ast_sched_del is called
+	  by the callback itself, it is immediately rejected (along with an ERROR log and
+	  a backtrace). Additionally, the AST_SCHED_DEL_UNREF macro is adjusted so the
+	  after-ast_sched_del-refcall function is only run if ast_sched_del returned
+	  success.
+
+	  This should fix the following spurious race condition found in chan_sip:
+	  - thread 1: schedule sip_poke_peer_now (using AST_SCHED_REPLACE)
+	  - thread 2: run sip_poke_peer_now
+	  - thread 2: blank out sched-ID (too soon!)
+	  - thread 1: set sched-ID (too late!)
+	  - thread 2: try to delete the currently running sched-ID
+
+	  After this fix, an ERROR would be logged, but no deadlocks (in do_monitor) nor
+	  excess calls to sip_unref_peer(peer) (causing double frees of rtp_instances and
+	  other madness) should occur.
+
+	  (Thanks Richard Mudgett for reviewing/improving this "scary" change.)
+
+	  Note that this change does not fix the observed race condition: unlocked
+	  access to peer->pokeexpire (and potentially other scheduled items in chan_sip),
+	  causing AST_SCHED_DEL_UNREF to look at a changing id. But it will make the
+	  deadlock go away. And in the observed case, it will not have adverse affects
+	  (like memory leaks) because the scheduled item is removed through a different
+	  path.
+
+	  ASTERISK-28282
+
+	  Change-Id: Ic26777fa0732725e6ca7010df17af77a012aa856
+
+2019-07-16 08:15 +0000 [aaafe8a108]  George Joseph <gjoseph@digium.com>
+
+	* Build: Add separate header install/uninstall targets
+
+	  Two new Makefile targets have been added... "install-headers" and
+	  "uninstall-headers" to separately control header installation.
+	  The existing behavior has not changed so "make install" and
+	  "make uninstall" will continue to also install/uninstall the headers.
+	  The new targets were added for forward compatibility with Asterisk 17
+	  in which the headers are no longer installed/uninstalled with the
+	  "install" and "uninstall" targets.
+
+	  Also corrects an issue where /usr/include/asterisk.h was never
+	  being removed at all.
+
+	  Change-Id: Ia7399f3a0203a4825fc4a9f43b9034dae9a2b643
+
+2019-07-09 14:42 +0000 [d2eaba4853]  Kevin Harwell <kharwell@digium.com>
+
+	* manager: Log AMI actions
+
+	  When manager debugging is turned on, this patch makes it so incoming AMI actions
+	  are now also logged.
+
+	  Change-Id: I8047524510e7ac97d99482b2448f8e368f29cd47
+
+2019-04-22 10:02 +0000 [d8bf4b1608]  Tzafrir Cohen <tzafrir.cohen@xorcom.com>
+
+	* openr2(1/6): bugfix in configuration saving
+
+	  Details:
+	    - The memcpy() call copied part of "dahdi_conf" and not "dahdi_conf.mfcr2"
+	    - As a result, the memcmp() in dahdi_r2_get_link() always fails
+	    - This cause dahdi_r2_get_link() to create new link for every channel
+	      (instead of a new link for every ~30 channels)
+	    - With the fix, far less links are generated -- so we use far less threads
+
+	  Change-Id: I7259dd6272f5e46e8a6c7f5bf3e8c2ec01b8c132
+	  Signed-off-by: Oron Peled <oron.peled@xorcom.com>
 
 2019-07-18 11:10 +0000  Asterisk Development Team <asteriskteam@digium.com>
 
