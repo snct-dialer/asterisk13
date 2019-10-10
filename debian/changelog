@@ -1,8 +1,8 @@
-asterisk (2:13.29.0~se-1) UNRELEASED; urgency=medium
+asterisk (2:13.29.0~se-1.buster) buster; urgency=medium
 
   * New upstream release.
 
- -- Jörg Frings-Fürst <debian@jff.email>  Thu, 10 Oct 2019 17:45:47 +0200
+ -- Jörg Frings-Fürst <debian@jff.email>  Thu, 10 Oct 2019 19:44:45 +0200
 
 asterisk (2:13.28.1~se-1.buster) buster; urgency=medium
 
