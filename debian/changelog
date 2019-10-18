@@ -1,4 +1,10 @@
-asterisk (2:13.29.0~se-1.stretch) stretch; urgency=medium
+asterisk (2:13.29.1~se-2.buster) buster; urgency=medium
+
+  * New upstream release.
+
+ -- Jörg Frings-Fürst <debian@jff.email>  Fri, 18 Oct 2019 11:47:22 +0200
+
+asterisk (2:13.29.0~se-1.buster) buster; urgency=medium
 
   * New upstream release.
 
