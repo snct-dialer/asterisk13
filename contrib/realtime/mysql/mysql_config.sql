@@ -1181,3 +1181,9 @@ ALTER TABLE ps_globals ADD COLUMN norefersub ENUM('0','1','off','on','false','tr
 
 UPDATE alembic_version SET version_num='3a094a18e75b' WHERE alembic_version.version_num = '80473bad3c16';
 
+-- Running upgrade 3a094a18e75b -> 339e1dfa644d
+
+ALTER TABLE ps_endpoints ADD COLUMN moh_passthrough ENUM('yes','no');
+
+UPDATE alembic_version SET version_num='339e1dfa644d' WHERE alembic_version.version_num = '3a094a18e75b';
+
