@@ -589,6 +589,10 @@ static int dtls_bio_write(BIO *bio, const char *buf, int len)
 	struct ast_sockaddr remote_address = { {0, } };
 	int ice;
 
+	/* OpenSSL can't tolerate a packet not being sent, so we always state that
+	 * we sent the packet. If it isn't then retransmission will occur.
+	 */
+
 	if (rtp->rtcp && rtp->rtcp->dtls.write_bio == bio) {
 		rtcp = 1;
 		ast_sockaddr_copy(&remote_address, &rtp->rtcp->them);
@@ -597,10 +601,12 @@ static int dtls_bio_write(BIO *bio, const char *buf, int len)
 	}
 
 	if (ast_sockaddr_isnull(&remote_address)) {
-		return 0;
+		return len;
 	}
 
-	return __rtp_sendto(instance, (char *)buf, len, 0, &remote_address, rtcp, &ice, 0);
+	__rtp_sendto(instance, (char *)buf, len, 0, &remote_address, rtcp, &ice, 0);
+
+	return len;
 }
 
 static long dtls_bio_ctrl(BIO *bio, int cmd, long arg1, void *arg2)
@@ -2674,11 +2680,11 @@ static int __rtp_recvfrom(struct ast_rtp_instance *instance, void *buf, size_t s
 		ao2_ref(ice, -1);
 		ao2_lock(instance);
 		if (status != PJ_SUCCESS) {
-			char buf[100];
+			char err_buf[100];
 
-			pj_strerror(status, buf, sizeof(buf));
+			pj_strerror(status, err_buf, sizeof(err_buf));
 			ast_log(LOG_WARNING, "PJ ICE Rx error status code: %d '%s'.\n",
-				(int)status, buf);
+				(int)status, err_buf);
 			return -1;
 		}
 		if (!rtp->passthrough) {

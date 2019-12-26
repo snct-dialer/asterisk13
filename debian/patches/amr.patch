@@ -710,7 +710,7 @@ Index: trunk/main/rtp_engine.c
 ===================================================================
 --- trunk.orig/main/rtp_engine.c
 +++ trunk/main/rtp_engine.c
-@@ -2746,6 +2746,9 @@ int ast_rtp_engine_init(void)
+@@ -2749,6 +2749,9 @@ int ast_rtp_engine_init(void)
  	set_next_mime_type(ast_format_vp8, 0,  "video", "VP8", 90000);
  	set_next_mime_type(ast_format_vp9, 0, "video", "VP9", 90000);
  
@@ -720,7 +720,7 @@ Index: trunk/main/rtp_engine.c
  	/* Define the static rtp payload mappings */
  	add_static_payload(0, ast_format_ulaw, 0);
  	#ifdef USE_DEPRECATED_G726
-@@ -2792,6 +2795,9 @@ int ast_rtp_engine_init(void)
+@@ -2795,6 +2798,9 @@ int ast_rtp_engine_init(void)
  	add_static_payload(100, ast_format_vp8, 0);
  	add_static_payload(107, ast_format_opus, 0);
  

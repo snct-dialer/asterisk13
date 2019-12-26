@@ -235,6 +235,13 @@ static int handle_incoming_sdp(struct ast_sip_session *session, const pjmedia_sd
 			continue;
 		}
 
+		/* If we have a port of 0, ignore this stream */
+		if (!sdp->media[i]->desc.port) {
+			ast_debug(1, "Declining incoming SDP media stream '%s' at position '%d'\n",
+				session_media->stream_type, i);
+			continue;
+		}
+
 		if (session_media->handler) {
 			handler = session_media->handler;
 			ast_debug(1, "Negotiating incoming SDP media stream '%s' using %s SDP handler\n",
@@ -1308,8 +1315,10 @@ static void session_destructor(void *obj)
 	struct ast_sip_session *session = obj;
 	struct ast_sip_session_supplement *supplement;
 	struct ast_sip_session_delayed_request *delay;
+
+	/* We dup the endpoint ID in case the endpoint gets freed out from under us */
 	const char *endpoint_name = session->endpoint ?
-		ast_sorcery_object_get_id(session->endpoint) : "<none>";
+		ast_strdupa(ast_sorcery_object_get_id(session->endpoint)) : "<none>";
 
 	ast_debug(3, "Destroying SIP session with endpoint %s\n", endpoint_name);
 
@@ -1484,6 +1493,7 @@ struct ast_sip_session *ast_sip_session_alloc(struct ast_sip_endpoint *endpoint,
 	session->inv_session = inv_session;
 
 	session->dtmf = endpoint->dtmf;
+	session->moh_passthrough = endpoint->moh_passthrough;
 
 	if (ast_sip_session_add_supplements(session)) {
 		/* Release the ref held by session->inv_session */

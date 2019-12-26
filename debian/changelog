@@ -1,3 +1,16 @@
+asterisk (2:13.30.0~se-1.stretch) stretch; urgency=medium
+
+  * New Upstream release.
+    - Refresh patches.
+
+ -- Jörg Frings-Fürst <debian@jff.email>  Thu, 26 Dec 2019 10:57:43 +0100
+
+asterisk (2:13.29.2~se-1.stretch) stretch; urgency=medium
+
+  * New upstream release.
+
+ -- Jörg Frings-Fürst <debian@jff.email>  Thu, 05 Dec 2019 15:14:41 +0100
+
 asterisk (2:13.29.1~se-2.stretch) stretch; urgency=medium
 
   * New upstream release.

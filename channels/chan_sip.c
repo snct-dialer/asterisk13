@@ -8143,8 +8143,11 @@ static struct ast_channel *sip_new(struct sip_pvt *i, int state, const char *tit
 	/* Use only the preferred audio format, which is stored at the '0' index */
 	fmt = ast_format_cap_get_best_by_type(what, AST_MEDIA_TYPE_AUDIO); /* get the best audio format */
 	if (fmt) {
+		int framing;
+
 		ast_format_cap_remove_by_type(caps, AST_MEDIA_TYPE_AUDIO); /* remove only the other audio formats */
-		ast_format_cap_append(caps, fmt, 0); /* add our best choice back */
+		framing = ast_format_cap_get_format_framing(what, fmt);
+		ast_format_cap_append(caps, fmt, framing); /* add our best choice back */
 	} else {
 		/* If we don't have an audio format, try to get something */
 		fmt = ast_format_cap_get_format(caps, 0);
@@ -19103,18 +19106,6 @@ static enum check_auth_result check_peer_ok(struct sip_pvt *p, char *of,
 		bogus_peer = NULL;
 	}
 
-	/*  build_peer, called through sip_find_peer, is not able to check the
-	 *  sip_pvt->natdetected flag in order to determine if the peer is behind
-	 *  NAT or not when SIP_PAGE3_NAT_AUTO_RPORT or SIP_PAGE3_NAT_AUTO_COMEDIA
-	 *  are set on the peer.  So we check for that here and set the peer's
-	 *  address accordingly.
-	 */
-	set_peer_nat(p, peer);
-
-	if (p->natdetected && ast_test_flag(&peer->flags[2], SIP_PAGE3_NAT_AUTO_RPORT)) {
-		ast_sockaddr_copy(&peer->addr, &p->recv);
-	}
-
 	if (!ast_apply_acl(peer->acl, addr, "SIP Peer ACL: ")) {
 		ast_debug(2, "Found peer '%s' for '%s', but fails host access\n", peer->name, of);
 		sip_unref_peer(peer, "sip_unref_peer: check_peer_ok: from sip_find_peer call, early return of AUTH_ACL_FAILED");
@@ -19183,6 +19174,21 @@ static enum check_auth_result check_peer_ok(struct sip_pvt *p, char *of,
 		ast_string_field_set(p, peermd5secret, NULL);
 	}
 	if (!(res = check_auth(p, req, peer->name, p->peersecret, p->peermd5secret, sipmethod, uri2, reliable))) {
+
+		/* build_peer, called through sip_find_peer, is not able to check the
+		 * sip_pvt->natdetected flag in order to determine if the peer is behind
+		 * NAT or not when SIP_PAGE3_NAT_AUTO_RPORT or SIP_PAGE3_NAT_AUTO_COMEDIA
+		 * are set on the peer. So we check for that here and set the peer's
+		 * address accordingly. The address should ONLY be set once we are sure
+		 * authentication was a success. If, for example, an INVITE was sent that
+		 * matched the peer name but failed the authentication check, the address
+		 * would be updated, which is bad.
+		 */
+		set_peer_nat(p, peer);
+		if (p->natdetected && ast_test_flag(&peer->flags[2], SIP_PAGE3_NAT_AUTO_RPORT)) {
+			ast_sockaddr_copy(&peer->addr, &p->recv);
+		}
+
 		/* If we have a call limit, set flag */
 		if (peer->call_limit)
 			ast_set_flag(&p->flags[0], SIP_CALL_LIMIT);
@@ -19282,6 +19288,7 @@ static enum check_auth_result check_peer_ok(struct sip_pvt *p, char *of,
 		}
 	}
 	sip_unref_peer(peer, "check_peer_ok: sip_unref_peer: tossing temp ptr to peer from sip_find_peer");
+
 	return res;
 }
 
@@ -31126,8 +31133,10 @@ static struct ast_variable *add_var(const char *buf, struct ast_variable *list)
 	if ((varval = strchr(varname, '='))) {
 		*varval++ = '\0';
 		if ((tmpvar = ast_variable_new(varname, varval, ""))) {
-			tmpvar->next = list;
-			list = tmpvar;
+			if (ast_variable_list_replace(&list, tmpvar)) {
+				tmpvar->next = list;
+				list = tmpvar;
+			}
 		}
 	}
 	return list;

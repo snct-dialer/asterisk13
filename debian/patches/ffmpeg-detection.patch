@@ -22,7 +22,7 @@ Index: trunk/configure.ac
  AST_EXT_LIB_SETUP([GSM], [External GSM], [gsm], [, use 'internal' GSM otherwise])
  AST_EXT_LIB_SETUP([ILBC], [System iLBC], [ilbc], [, use 'internal' iLBC otherwise])
  AST_EXT_LIB_SETUP([GTK2], [gtk2], [gtk2])
-@@ -2725,7 +2725,18 @@ AST_C_DEFINE_CHECK([SO_NOSIGPIPE], [SO_N
+@@ -2745,7 +2745,18 @@ AST_C_DEFINE_CHECK([SO_NOSIGPIPE], [SO_N
  
  AST_EXT_TOOL_CHECK([SDL], [sdl-config])
  AST_EXT_LIB_CHECK([SDL_IMAGE], [SDL_image], [IMG_Load], [SDL_image.h], [${SDL_LIB}], [${SDL_INCLUDE}])
