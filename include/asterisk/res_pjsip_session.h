@@ -81,8 +81,10 @@ struct ast_sip_session_media {
 	int keepalive_sched_id;
 	/*! \brief Scheduler ID for RTP timeout */
 	int timeout_sched_id;
-	/*! \brief Stream is on hold */
-	unsigned int held:1;
+	/*! \brief Stream is on hold by remote side */
+	unsigned int remotely_held:1;
+	/*! \brief Stream is on hold by local side */
+	unsigned int locally_held:1;
 	/*! \brief Does remote support rtcp_mux */
 	unsigned int remote_rtcp_mux:1;
 	/*! \brief Does remote support ice */
@@ -159,6 +161,8 @@ struct ast_sip_session {
 	unsigned int defer_end:1;
 	/*! Session end (remote hangup) requested while termination deferred */
 	unsigned int ended_while_deferred:1;
+	/*! Whether to pass through hold and unhold using re-invites with recvonly and sendrecv */
+	unsigned int moh_passthrough:1;
 	/*! DTMF mode to use with this session, from endpoint but can change */
 	enum ast_sip_dtmf_mode dtmf;
 	/*! Initial incoming INVITE Request-URI.  NULL otherwise. */

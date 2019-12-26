@@ -1359,6 +1359,39 @@ static int update_connected_line_information(void *data)
 	return 0;
 }
 
+/*! \brief Callback which changes the value of locally held on the media stream */
+static int local_hold_set_state(void *obj, void *arg, int flags)
+{
+	struct ast_sip_session_media *session_media = obj;
+	unsigned int *held = arg;
+
+	session_media->locally_held = *held;
+
+	return 0;
+}
+
+/*! \brief Update local hold state and send a re-INVITE with the new SDP */
+static int remote_send_hold_refresh(struct ast_sip_session *session, unsigned int held)
+{
+	ao2_callback(session->media, OBJ_NODATA, local_hold_set_state, &held);
+	ast_sip_session_refresh(session, NULL, NULL, NULL, AST_SIP_SESSION_REFRESH_METHOD_INVITE, 1);
+	ao2_ref(session, -1);
+
+	return 0;
+}
+
+/*! \brief Update local hold state to be held */
+static int remote_send_hold(void *data)
+{
+	return remote_send_hold_refresh(data, 1);
+}
+
+/*! \brief Update local hold state to be unheld */
+static int remote_send_unhold(void *data)
+{
+	return remote_send_hold_refresh(data, 0);
+}
+
 /*! \brief Function called by core to ask the channel to indicate some sort of condition */
 static int chan_pjsip_indicate(struct ast_channel *ast, int condition, const void *data, size_t datalen)
 {
@@ -1503,7 +1536,15 @@ static int chan_pjsip_indicate(struct ast_channel *ast, int condition, const voi
 		device_buf = alloca(device_buf_size);
 		ast_channel_get_device_name(ast, device_buf, device_buf_size);
 		ast_devstate_changed_literal(AST_DEVICE_ONHOLD, 1, device_buf);
-		ast_moh_start(ast, data, NULL);
+		if (!channel->session->moh_passthrough) {
+			ast_moh_start(ast, data, NULL);
+		} else {
+			if (ast_sip_push_task(channel->session->serializer, remote_send_hold, ao2_bump(channel->session))) {
+				ast_log(LOG_WARNING, "Could not queue task to remotely put session '%s' on hold with endpoint '%s'\n",
+					ast_sorcery_object_get_id(channel->session), ast_sorcery_object_get_id(channel->session->endpoint));
+				ao2_ref(channel->session, -1);
+			}
+		}
 		break;
 	case AST_CONTROL_UNHOLD:
 		chan_pjsip_remove_hold(ast_channel_uniqueid(ast));
@@ -1511,7 +1552,15 @@ static int chan_pjsip_indicate(struct ast_channel *ast, int condition, const voi
 		device_buf = alloca(device_buf_size);
 		ast_channel_get_device_name(ast, device_buf, device_buf_size);
 		ast_devstate_changed_literal(AST_DEVICE_UNKNOWN, 1, device_buf);
-		ast_moh_stop(ast);
+		if (!channel->session->moh_passthrough) {
+			ast_moh_stop(ast);
+		} else {
+			if (ast_sip_push_task(channel->session->serializer, remote_send_unhold, ao2_bump(channel->session))) {
+				ast_log(LOG_WARNING, "Could not queue task to remotely take session '%s' off hold with endpoint '%s'\n",
+					ast_sorcery_object_get_id(channel->session), ast_sorcery_object_get_id(channel->session->endpoint));
+				ao2_ref(channel->session, -1);
+			}
+		}
 		break;
 	case AST_CONTROL_SRCUPDATE:
 		break;
@@ -1872,6 +1921,12 @@ static int chan_pjsip_digit_end(struct ast_channel *ast, char digit, unsigned in
 	struct chan_pjsip_pvt *pvt = channel->pvt;
 	struct ast_sip_session_media *media = pvt->media[SIP_MEDIA_AUDIO];
 	int res = 0;
+
+	if (!channel || !channel->session) {
+		/* This happens when the channel is hungup while a DTMF digit is playing. See ASTERISK-28086 */
+		ast_debug(3, "Channel %s disappeared while calling digit_end\n", ast_channel_name(ast));
+		return -1;
+	}
 
 	switch (channel->session->dtmf) {
 	case AST_SIP_DTMF_AUTO_INFO:
@@ -2820,6 +2875,12 @@ static struct ast_custom_function dtmf_mode_function = {
 	.write = pjsip_acf_dtmf_mode_write
 };
 
+static struct ast_custom_function moh_passthrough_function = {
+	.name = "PJSIP_MOH_PASSTHROUGH",
+	.read = pjsip_acf_moh_passthrough_read,
+	.write = pjsip_acf_moh_passthrough_write
+};
+
 static struct ast_custom_function session_refresh_function = {
 	.name = "PJSIP_SEND_SESSION_REFRESH",
 	.write = pjsip_acf_session_refresh_write,
@@ -2871,6 +2932,11 @@ static int load_module(void)
 
 	if (ast_custom_function_register(&dtmf_mode_function)) {
 		ast_log(LOG_WARNING, "Unable to register PJSIP_DTMF_MODE dialplan function\n");
+		goto end;
+	}
+
+	if (ast_custom_function_register(&moh_passthrough_function)) {
+		ast_log(LOG_WARNING, "Unable to register PJSIP_MOH_PASSTHROUGH dialplan function\n");
 		goto end;
 	}
 
@@ -2934,6 +3000,7 @@ end:
 	ast_sip_session_unregister_supplement(&chan_pjsip_supplement);
 	ast_sip_session_unregister_supplement(&call_pickup_supplement);
 	ast_custom_function_unregister(&dtmf_mode_function);
+	ast_custom_function_unregister(&moh_passthrough_function);
 	ast_custom_function_unregister(&media_offer_function);
 	ast_custom_function_unregister(&chan_pjsip_dial_contacts_function);
 	ast_custom_function_unregister(&chan_pjsip_parse_uri_function);
@@ -2959,6 +3026,7 @@ static int unload_module(void)
 	ast_sip_session_unregister_supplement(&call_pickup_supplement);
 
 	ast_custom_function_unregister(&dtmf_mode_function);
+	ast_custom_function_unregister(&moh_passthrough_function);
 	ast_custom_function_unregister(&media_offer_function);
 	ast_custom_function_unregister(&chan_pjsip_dial_contacts_function);
 	ast_custom_function_unregister(&chan_pjsip_parse_uri_function);

@@ -115,8 +115,7 @@ pipeline {
 									[$class: 'CloneOption',
 										honorRefspec: true,
 										noTags: true,
-										depth: 10,
-										shallow: true
+										shallow: false
 									],
 									[$class: 'PruneStaleBranch'],
 									[$class: 'BuildChooserSetting',
@@ -183,7 +182,11 @@ pipeline {
 	}
 	post {
 		cleanup {
-            cleanWs deleteDirs: true, notFailBuild: true
+			script {
+				if (env.CLEANUP_WS_UNITTESTS.toBoolean()) {
+					cleanWs deleteDirs: true, notFailBuild: false
+				}
+			}
 		}
 		/*
 		 * The Gerrit Trigger will automatically post the "Verified" results back
