@@ -2844,6 +2844,11 @@ static int pbx_extension_helper(struct ast_channel *c, struct ast_context *con,
 	int matching_action = (action == E_MATCH || action == E_CANMATCH || action == E_MATCHMORE);
 
 	ast_rdlock_contexts();
+
+	if (!context) {
+		context = con->name;
+	}
+
 	if (found)
 		*found = 0;
 
@@ -7515,6 +7520,7 @@ static void *pbx_outgoing_exec(void *data)
 {
 	RAII_VAR(struct pbx_outgoing *, outgoing, data, ao2_cleanup);
 	enum ast_dial_result res;
+	struct ast_channel *chan;
 
 	res = ast_dial_run(outgoing->dial, NULL, 0);
 
@@ -7535,36 +7541,37 @@ static void *pbx_outgoing_exec(void *data)
 		return NULL;
 	}
 
+	/* We steal the channel so we get ownership of when it is hung up */
+	chan = ast_dial_answered_steal(outgoing->dial);
+
 	if (!ast_strlen_zero(outgoing->app)) {
 		struct ast_app *app = pbx_findapp(outgoing->app);
 
 		if (app) {
 			ast_verb(4, "Launching %s(%s) on %s\n", outgoing->app, S_OR(outgoing->appdata, ""),
-				ast_channel_name(ast_dial_answered(outgoing->dial)));
-			pbx_exec(ast_dial_answered(outgoing->dial), app, outgoing->appdata);
+				ast_channel_name(chan));
+			pbx_exec(chan, app, outgoing->appdata);
 		} else {
 			ast_log(LOG_WARNING, "No such application '%s'\n", outgoing->app);
 		}
-	} else {
-		struct ast_channel *answered = ast_dial_answered(outgoing->dial);
 
+		ast_hangup(chan);
+	} else {
 		if (!ast_strlen_zero(outgoing->context)) {
-			ast_channel_context_set(answered, outgoing->context);
+			ast_channel_context_set(chan, outgoing->context);
 		}
 
 		if (!ast_strlen_zero(outgoing->exten)) {
-			ast_channel_exten_set(answered, outgoing->exten);
+			ast_channel_exten_set(chan, outgoing->exten);
 		}
 
 		if (outgoing->priority > 0) {
-			ast_channel_priority_set(answered, outgoing->priority);
+			ast_channel_priority_set(chan, outgoing->priority);
 		}
 
-		if (ast_pbx_run(answered)) {
-			ast_log(LOG_ERROR, "Failed to start PBX on %s\n", ast_channel_name(answered));
-		} else {
-			/* PBX will have taken care of hanging up, so we steal the answered channel so dial doesn't do it */
-			ast_dial_answered_steal(outgoing->dial);
+		if (ast_pbx_run(chan)) {
+			ast_log(LOG_ERROR, "Failed to start PBX on %s\n", ast_channel_name(chan));
+			ast_hangup(chan);
 		}
 	}
 
