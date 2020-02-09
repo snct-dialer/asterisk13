@@ -2568,10 +2568,14 @@ static int sip_tcptls_write(struct ast_tcptls_session_instance *tcptls_session, 
 
 	ao2_lock(tcptls_session);
 
-	if ((tcptls_session->fd == -1) ||
-		!(th = ao2_t_find(threadt, &tmp, OBJ_POINTER, "ao2_find, getting sip_threadinfo in tcp helper thread")) ||
+	if (tcptls_session->fd == -1 ||
 		!(packet = ao2_alloc(sizeof(*packet), tcptls_packet_destructor)) ||
 		!(packet->data = ast_str_create(len))) {
+		goto tcptls_write_setup_error;
+	}
+
+	if (!(th = ao2_t_find(threadt, &tmp, OBJ_POINTER, "ao2_find, getting sip_threadinfo in tcp helper thread"))) {
+		ast_log(LOG_ERROR, "Unable to locate tcptls_session helper thread.\n");
 		goto tcptls_write_setup_error;
 	}
 
@@ -3758,6 +3762,9 @@ static int __sip_xmit(struct sip_pvt *p, struct ast_str *data)
 		res = ast_sendto(p->socket.fd, ast_str_buffer(data), ast_str_strlen(data), 0, dst);
 	} else if (p->socket.tcptls_session) {
 		res = sip_tcptls_write(p->socket.tcptls_session, ast_str_buffer(data), ast_str_strlen(data));
+		if (res < -1) {
+			return res;
+		}
 	} else if (p->socket.ws_session) {
 		if (!(res = ast_websocket_write_string(p->socket.ws_session, ast_str_buffer(data)))) {
 			/* The WebSocket API just returns 0 on success and -1 on failure, while this code expects the payload length to be returned */
@@ -9826,8 +9833,10 @@ static void lws2sws(struct ast_str *data)
 	int len = ast_str_strlen(data);
 	int h = 0, t = 0;
 	int lws = 0;
+	int just_read_eol = 0;
+	int done_with_headers = 0;
 
-	for (; h < len;) {
+	while (h < len) {
 		/* Eliminate all CRs */
 		if (msgbuf[h] == '\r') {
 			h++;
@@ -9835,11 +9844,17 @@ static void lws2sws(struct ast_str *data)
 		}
 		/* Check for end-of-line */
 		if (msgbuf[h] == '\n') {
+			if (just_read_eol) {
+				done_with_headers = 1;
+			} else {
+				just_read_eol = 1;
+			}
 			/* Check for end-of-message */
 			if (h + 1 == len)
 				break;
 			/* Check for a continuation line */
-			if (msgbuf[h + 1] == ' ' || msgbuf[h + 1] == '\t') {
+			if (!done_with_headers
+			   && (msgbuf[h + 1] == ' ' || msgbuf[h + 1] == '\t')) {
 				/* Merge continuation line */
 				h++;
 				continue;
@@ -9848,8 +9863,11 @@ static void lws2sws(struct ast_str *data)
 			msgbuf[t++] = msgbuf[h++];
 			lws = 0;
 			continue;
+		} else {
+			just_read_eol = 0;
 		}
-		if (msgbuf[h] == ' ' || msgbuf[h] == '\t') {
+		if (!done_with_headers
+		   && (msgbuf[h] == ' ' || msgbuf[h] == '\t')) {
 			if (lws) {
 				h++;
 				continue;
@@ -15682,7 +15700,6 @@ static void update_connectedline(struct sip_pvt *p, const void *data, size_t dat
 			initialize_initreq(p, &req);
 			p->lastinvite = p->ocseq;
 			ast_set_flag(&p->flags[0], SIP_OUTGOING);
-			p->invitestate = INV_CALLING;
 			send_request(p, &req, XMIT_CRITICAL, p->ocseq);
 		} else if ((is_method_allowed(&p->allowed_methods, SIP_UPDATE)) && (!ast_strlen_zero(p->okcontacturi))) {
 			reqprep(&req, p, SIP_UPDATE, 0, 1);
@@ -30167,6 +30184,9 @@ static int sip_send_keepalive(const void *data)
 		   (peer->socket.tcptls_session) &&
 		   (peer->socket.tcptls_session->fd != -1)) {
 		res = sip_tcptls_write(peer->socket.tcptls_session, keepalive, count);
+		if (res < -1) {
+			return 0;
+		}
 	} else if (peer->socket.type == AST_TRANSPORT_UDP) {
 		res = ast_sendto(sipsock, keepalive, count, 0, &peer->addr);
 	}
