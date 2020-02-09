@@ -1,3 +1,10 @@
+asterisk (2:13.31.0~se-1.stretch) UNRELEASED; urgency=medium
+
+  * New upstream release.
+    - refresh patches.
+
+ -- Jörg Frings-Fürst <debian@jff.email>  Sun, 09 Feb 2020 21:47:26 +0100
+
 asterisk (2:13.30.0~se-1.buster) buster; urgency=medium
 
   * Release buster.
