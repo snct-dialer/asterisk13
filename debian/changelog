@@ -1,4 +1,4 @@
-asterisk (2:13.31.0~se-1.stretch) UNRELEASED; urgency=medium
+asterisk (2:13.31.0~se-1.stretch) stretch; urgency=medium
 
   * New upstream release.
     - refresh patches.
