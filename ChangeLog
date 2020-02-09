@@ -1,28 +1,641 @@
-2019-12-23 16:22 +0000  Asterisk Development Team <asteriskteam@digium.com>
+2020-02-04 14:50 +0000  Asterisk Development Team <asteriskteam@digium.com>
 
-	* asterisk 13.30.0 Released.
+	* asterisk 13.31.0 Released.
 
-2019-12-18 15:48 +0000  Asterisk Development Team <asteriskteam@digium.com>
+2020-01-30 16:33 +0000  Asterisk Development Team <asteriskteam@digium.com>
 
-	* asterisk 13.30.0-rc2 Released.
+	* asterisk 13.31.0-rc2 Released.
 
-2019-12-18 08:30 +0000 [5bf28c4fe6]  George Joseph <gjoseph@digium.com>
+2020-01-27 11:44 +0000 [fb7a668d69]  Kevin Harwell <kharwell@digium.com>
 
-	* Revert "chan_dahdi: set CHANNEL(hangupsource) when a PRI channel hangs up"
+	* res_stasis: trigger cleanup after update
 
-	  There are reports that this commit causes deadlocks when issuing
-	  a "pri show" CLI command and a channel is in the process of being
-	  hung up.  Further work is in progress to determine the cause of
-	  the deadlock and provide a permanent fix.
+	  The cleanup code in stasis shuts down applications if they are in a deactivated
+	  state, and no longer have explicit subscriptions. When registering an app the
+	  cleanup code was running before calling 'update'. When it should be executed
+	  after 'update' since a call to register may re-activate the app. We don't want
+	  it to shutdown before the 'update' otherwise the app won't be re-activated,
+	  or registered.
 
-	  ASTERISK~28605  #keeping open
+	  This patch makes it so the cleanup code is executed post 'update'.
+
+	  ASTERISK-28679 #close
+
+	  Change-Id: I8f2c0b17e33bb8128441567b97fd4c7bf74a327b
+	  (cherry picked from commit 1051227dd96341f6e149739c1465b2e763cc67ea)
+
+2020-01-27 12:01 +0000 [2cacc1e7f8]  Kevin Harwell <kharwell@digium.com>
+
+	* stasis/app: don't lock an app before a call to send
+
+	  Calling 'app_send' eventually calls the app's message handler. It's possible
+	  for a handler to obtain a lock on another object, and then need/want to lock
+	  the app object. If the caller of 'app_send' locks the app object prior to
+	  calling then there's a potential for a deadlock, if another thread calls
+	  'app_send' without locking.
+
+	  This patch makes it so 'app_send' is not called with the app object locked in
+	  the section of code doing such.
+
+	  ASTERISK-28423 #close
+
+	  Change-Id: I6767c6d0933c7db1b984018966eefca4c0638a27
+	  (cherry picked from commit 78d9bc8ef66e2d20925daf0eb597cf8a956e1029)
+
+2020-01-28 09:18 +0000 [5def6d7e17]  Joshua C. Colp <jcolp@sangoma.com>
+
+	* res_pjsip_pubsub: Increment persistence data ref when recreating.
+
+	  Each subscription needs to have a reference to the persisted data
+	  for it, as well as the main JSON contained within the tree. When
+	  recreating a subscription this did not occur and they both shared
+	  the same reference.
+
+	  ASTERISK-28714
+
+	  Change-Id: I706abd49ea182ea367a4ac3feca2706460ae9f4a
+	  (cherry picked from commit e14fd3b22a832f1e49fbdf340727c12f0c0d2929)
+
+2020-01-23 16:23 +0000  Asterisk Development Team <asteriskteam@digium.com>
+
+	* asterisk 13.31.0-rc1 Released.
+
+2020-01-23 10:06 +0000 [fe72f4e216]  Asterisk Development Team <asteriskteam@digium.com>
+
+	* Update CHANGES and UPGRADE.txt for 13.31.0
+2020-01-22 12:56 +0000 [4eb2ad5e17]  George Joseph <gjoseph@digium.com>
+
+	* cdr.c: Set event time on party b when leaving a parking bridge
+
+	  When Alice calls Bob and Bob does a blind transfer to Charlie,
+	  Bob's bridge leave event generates a finalize on both the party_a
+	  and party_b CDRs but while the party_a CDR has the correct end time
+	  set from the event time, party_b's leg did not. This caused that
+	  CDR's end time to be equal to the answered time and resulted in a
+	  billsec of 0.
+
+	  * We now pass the bridge leave message event time to
+	  cdr_object_party_b_left_bridge_cb() and set it on that CDR before
+	  calling cdr_object_finalize() on it.
+
+	  NOTE:  This issue affected transfers using chan_sip most of the
+	  time but also occasionally affected chan_pjsip probably due to
+	  message timing.
+
+	  ASTERISK-28677
+	  Reported by: Maciej Michno
+
+	  Change-Id: I790720f1e7326f9b8ce8293028743b0ef0fb2cca
+
+2020-01-22 09:39 +0000 [b6ebdabd9c]  Sean Bright <sean.bright@gmail.com>
+
+	* http: Add ability to disable /httpstatus URI
+
+	  Add a new configuration option 'enable_status' which allows the
+	  /httpstatus URI handler to be administratively disabled.
+
+	  We also no longer unconditionally register the /static and /httpstatus
+	  URI handlers, but instead do it based upon configuration.
+
+	  Behavior change: If enable_static was turned off, the URI handler was
+	  still installed but returned a 403 when it was accessed. Because we
+	  now register/unregister the URI handlers as appropriate, if the
+	  /static URI is disabled we will return a 404 instead.
+
+	  Additionally:
+
+	  * Change 'enablestatic' to 'enable_static' but keep the former for
+	    backwards compatibility.
+	  * Improve some internal variable names
+
+	  ASTERISK-28710 #close
+
+	  Change-Id: I647510f796473793b1d3ce1beb32659813be69e1
+
+2020-01-20 13:53 +0000 [ca7309fd29]  Sean Bright <sean.bright@gmail.com>
+
+	* translate.c: Fix silk 24kHz truncation in 'core show translation'
+
+	  SILK @ 24kHz is not shown in the 'core show translation' output because of an
+	  off-by-one-error. Discovered while looking into ASTERISK~19871.
+
+	  ASTERISK-28706
+	  Reported by: Sean Bright
+
+	  Change-Id: Ie1a551a8a484e07b45c8699cc0c90f1061029510
+
+2020-01-20 15:26 +0000 [14de6b9ba7]  Sean Bright <sean.bright@gmail.com>
+
+	* func_odbc.conf.sample: Add example lookup
+
+	  Change-Id: Ia05aab1f579597963d2ea23920d2210cfcb97c84
+
+2020-01-20 11:18 +0000 [9382718f50]  Sean Bright <sean.bright@gmail.com>
+
+	* res_statsd: Document that res_statsd does nothing on its own
+
+	  ASTERISK-24484 #close
+	  Reported by: Dan Jenkins
+
+	  Change-Id: I05f298904511d6739aefb1486b6fcbee27efa9ec
+
+2016-09-30 21:56 +0000 [5c5bf49cb1]  Rodrigo Ramírez Norambuena <a@rodrigoramirez.com>
+
+	* queue_log: Add alembic script for generate db table for queue_log
+
+	  Change-Id: I35b928a6251f9da9a1742b2cd14c63a00c3d0f0c
+
+2020-01-18 15:54 +0000 [419fd1da11]  Andrew Siplas <andrew@asiplas.net>
+
+	* chan_dahdi: Change 999999 to INT_MAX to better reflect "no timeout"
+
+	  The no-entry timeout set to 999999 == 16⅔ minutes, change to INT_MAX
+	  to match behavior of "no timeout" defined in comment.
+
+	  ASTERISK-28702 #close
+
+	  Change-Id: I4ea015986e061374385dba247b272f7aac60bf11
+
+2020-01-16 13:47 +0000 [ee05a43951]  Sean Bright <sean.bright@gmail.com>
+
+	* app_voicemail, say: Fix various leading whitespace problems
+
+	  In af90afd90c64c5183c2207d061f9aa15138081b2, Japanese language support
+	  was added to app_voicemail and main/say.c, but the leading whitespace
+	  is not consistent with Asterisk coding guidelines. This patch fixes
+	  that.
+
+	  Whitespace only, no functional change.
+
+	  ASTERISK~23324
+	  Reported by: Kevin McCoy
+
+	  Change-Id: I72c725f5930084673749bd7c9cc426a987f08e87
+
+2020-01-16 07:32 +0000 [884b86e7c0]  Sean Bright <sean.bright@gmail.com>
+
+	* pbx.c: Include filesystem cache in free memory calculation
+
+	  ASTERISK-28695 #close
+	  Reported by: Kevin Flyn
+
+	  Change-Id: Ief098bb6eb77378daeace8f97ba30701c8de55b8
+
+2020-01-16 09:09 +0000 [d514fa3300]  Sean Bright <sean.bright@gmail.com>
+
+	* chan_sip.c: Stop handling continuation lines after reading headers
+
+	  lws2sws() does not stop trying to handle header continuation lines
+	  even after all headers have been found. This is problematic if the
+	  first character of a SIP message body is a space or tab character, so
+	  we update to recognize the end of the message header.
+
+	  ASTERISK-28693 #close
+	  Reported by: Frank Matano
+
+	  Change-Id: Idec8fa58545cd3fd898cbe0075d76c223f8d33df
+
+2020-01-15 14:29 +0000 [6906e0aa3c]  Sean Bright <sean.bright@gmail.com>
+
+	* app_voicemail: Prevent crash when saving message with realtime voicemail
+
+	  ast_store_realtime() is not NULL tolerant, so we need to initialize
+	  the field values we pass to it to the empty string to avoid a crash.
+
+	  ASTERISK-23739 #close
+	  Reported by: Stas Kobzar
+
+	  Change-Id: I756c5dd0299c77f4274368f7c99eb0464367466c
+
+2020-01-14 16:20 +0000 [d0a412fced]  Sean Bright <sean.bright@gmail.com>
+
+	* app_voicemail: Set globals to default values when voicemail.conf missing
+
+	  If voicemail.conf exists but is empty, the config parsing process will
+	  default a number of global variables to non-zero values. On the other
+	  hand, if voicemail.conf is missing (arguably semantically equivalent
+	  to an empty file), this process is skipped and the globals are
+	  defaulted to 0.
+
+	  Set the globals to the same values they would be set to if a
+	  configuration were present. This allows voicemail configuration to be
+	  done completely by Realtime without the need to create an empty
+	  voicemail.conf file.
+
+	  ASTERISK-27622 #close
+	  Reported by: Jim Van Meggelen
+
+	  Change-Id: Id907d280f310f12e542ca527e6a025432b9fb409
+
+2020-01-11 07:29 +0000 [1a4fcaadb2]  Sean Bright <sean.bright@gmail.com>
+
+	* app_queue: Deprecate the QueueMemberPause.Reason field
+
+	  The QueueMemberPause AMI event includes two fields that return the
+	  reason a member was paused.
+
+	  * In release branches, deprecate Reason in favor of PausedReason.
+	  * In master, remove the Reason field entirely.
+
+	  ASTERISK-28349 #close
+	  Reported by: Niksa Baldun
+
+	  Change-Id: I01da58f2b0ab927baeee754870f62b51b7b3d296
+
+2020-01-13 16:37 +0000 [5e868fc11f]  Sean Bright <sean.bright@gmail.com>
+
+	* res_realtime: Fix 'realtime update2' argument handling
+
+	  The change in 9b99ef50b5d01ee8111d26efa7b926bdfaf3f980 updated the
+	  syntax of the 'realtime update2' CLI command but did not correctly
+	  update the calls to ast_update2_realtime().
+
+	  The issue this addresses was originally opened because we aren't
+	  allowing a SQL NULL to be set as part of the update, but this is a
+	  limitation of the Realtime API and is not a bug.
+
+	  Additionally, this patch:
+
+	  * Corrects the example in the command documentation to reflect
+	    'update2' instead of 'update.'
+
+	  * Fixes the leading spacing of the command documentation.
+
+	  * Checks that the required 'NULL' literal argument is present where we
+	    expect it to be.
+
+	  ASTERISK-21794 #close
+	  Reported by: Cédric Bassaget
+
+	  Change-Id: Idda63a5dc50d5f9bcb34c27ea3238d90f733b2cd
+
+2020-01-10 13:30 +0000 [53967ebd0f]  Sean Bright <sean.bright@gmail.com>
+
+	* func_curl: Add 'followlocation' option to CURLOPT()
+
+	  We allow for 'maxredirs' to be set, but this value is ignored when
+	  followlocation is not enabled which, by default, it is not.
+
+	  ASTERISK-17491 #close
+	  Reported by: candrews
+
+	  Change-Id: I96a4ab0142f2fb7d2e96ff976f6cf7b2982c761a
+
+2020-01-10 15:13 +0000 [b8963987a6]  Sean Bright <sean.bright@gmail.com>
+
+	* res_pjsip_endpoint_identifier_ip: Document support for hostnames
+
+	  ASTERISK-25429 #close
+	  Reported by: Joshua C. Colp
+
+	  Change-Id: I7cdfc6026821636acc2465094b7fcde8471a3824
+
+2020-01-10 14:43 +0000 [6648472a28]  Sean Bright <sean.bright@gmail.com>
+
+	* res_pjsip_notify: Only allow a single Event header to be added to a NOTIFY
+
+	  ASTERISK-27775 #close
+	  Reported by: AvayaXAsterisk
+
+	  Change-Id: Iad158e908e34675ad98f74d09c5e73024e50c257
+
+2019-12-03 12:27 +0000 [e7d2ab666b]  Jaco Kroon <jaco@uls.co.za>
+
+	* netsock2: ast_addressfamily_to_sockaddrsize and ast_sockaddr_from_sockaddr.
+
+	  ast_addressfamily_to_sockaddrize will determine the size that's
+	  required, and ast_sockaddr_from_sockaddr then wraps this new function
+	  and ast_sockaddr_copy_sockaddr to copy arbitrary sockaddr's (without
+	  knowing the address family) into the ast_sockaddr structure.
+
+	  Change-Id: Iee604e96e9096c79b477d6e5ff310cf0b06dae86
+	  Signed-off-by: Jaco Kroon <jaco@uls.co.za>
+
+2020-01-09 04:37 +0000 [7601a5f0f8]  Corey Farrell <git@cfware.com>
+
+	* app_record: Do not hang up if beep audio is missing
+
+	  Additionally alter the warning to mention that it was "beep" which could
+	  not be streamed to give admins a better clue about what the warning
+	  means.
+
+	  ASTERISK-28682
+
+	  Change-Id: If5aed21226a173117ed17589f44826dd1ba6576e
+
+2020-01-08 13:54 +0000 [ba5b0c5c36]  Kevin Harwell <kharwell@digium.com>
+
+	* app_agent_pool: Update XML docs for AgentLogin
+
+	  This patch fixes some wrongly formatted documentation for the AgentLogin
+	  application. A couple of "see also" links should contain only the function
+	  name, and no parameters.
+
+	  Change-Id: I3f788b47dce3292e311f8a9856938d59a0bd0661
+
+2020-01-08 12:11 +0000 [83077366de]  George Joseph <gjoseph@digium.com>
+
+	* CI: Update buildAsterisk.sh to do a "make full"
+
+	  If you do a "make all" when building Asterisk the xml documentation
+	  produced will be missing certain AMI events where their
+	  documentation is located not at the top of the c source file but
+	  embedded further down next to the event's manager_event()
+	  registration call.  See main/manager_mwi.c for an example.
+
+	  "make full" does produce the correct documentation so we're changing
+	  it in the build script.  A separate commit/issue will address the
+	  problem with "make all".
+
+	  ASTERISK-28507
+	  Reported by: David Lee
+
+	  Change-Id: I4a22635d6eef99eacecc0efb69e28360eebdb86c
+
+2020-01-06 09:02 +0000 [9720b29d8e]  Joshua C. Colp <jcolp@sangoma.com>
+
+	* res_pjsip_pubsub: Add ability to persist generator state information.
+
+	  Some body generators, such as dialog-info+xml, require storing state
+	  information which is then conveyed in the NOTIFY request itself. Up
+	  until now there was no way for such body generators to persist this
+	  information.
+
+	  Two new API calls have been added to allow body generators to set and
+	  get persisted data. This data is persisted out alongside the normal
+	  persistence information and allows the body generator to restore
+	  state information or to simply use this for normal storage of state.
+	  State is stored in the form of JSON and it is up to the body
+	  generator to interpret this as needed.
+
+	  The dialog-info+xml body generator has been updated to take advantage
+	  of this to persist the version number.
+
+	  ASTERISK-27759
+
+	  Change-Id: I5fda56c624fd13c17b3c48e0319b77079e9e27de
+
+2019-12-24 09:16 +0000 [49bb7d85cd]  Sean Bright <sean.bright@gmail.com>
+
+	* res_pjsip_endpoint_identifier_ip.c: Add port matching support
+
+	  Adds source port matching support when IP matching is used:
+
+	    [example]
+	    type = identify
+	    match = 1.2.3.4:5060/32, 1.2.3.4:6000/32, asterisk.org:4444
+
+	  If the IP matches but the source port does not, we reject and search for
+	  alternatives. SRV lookups are still performed if enabled (srv_lookups = yes),
+	  unless the configured FQDN includes a port number in which case just a host
+	  lookup is performed.
+
+	  ASTERISK-28639 #close
+	  Reported by: Mitch Claborn
+
+	  Change-Id: I256d5bd5d478b95f526e2f80ace31b690eebba92
+
+2019-12-30 11:04 +0000 [9249c30b87]  George Joseph <gjoseph@digium.com>
+
+	* sig_pri:  Fix deadlock caused by sig_pri_queue_hangup
+
+	  The change to add setting hangupsource to sig_pri_queue_hangup()
+	  made in https://gerrit.asterisk.org/c/asterisk/+/12857 casued
+	  deadlocks when a hangup request was received from the core at the
+	  same time a hanguprequest was received from the remote end via the
+	  D channel.
+
+	  Although the PRI's channel private structure was being unlocked
+	  before setting the hangupsource, the PRI's own lock was still being
+	  held during the process.  If channel actions were also coming from
+	  the core, a deadlock on the PRI could result.  This deadlock could
+	  then escalate to the entire DAHDI subsystem via DAHDI's global
+	  interface list lock, especially if someone used the PRI CLI commands.
+
+	  Fix:
+
+	  * We now unlock the PRI as well as the PRI's channel private
+	    structure before setting the hangupsource, then relock both
+	    afterwards.
+
+	  ASTERISK-28605
 	  Reported by: Dirk Wendland
 
-	  This reverts commit c6b17b521231dde9da890d95ee705c93953bab8c.
+	  Change-Id: Id74aaa5d4e3746063dbe9deed188eb65193cb9c9
 
-	  Change-Id: Iddd900c1abdd5074ff39c17cdce855f2f436cef9
+2019-12-30 13:13 +0000 [3a8290d1f2]  Richard Mudgett <rmudgett@digium.com>
 
-2019-12-16 19:18 +0000 [4dd2a02752]  Joshua C. Colp <jcolp@sangoma.com>
+	* app_chanisavail.c: Simplify dialplan using ChanIsAvail.
+
+	  Dialplan has to be careful about passing an empty device list or empty
+	  positions in the list.  As a result, dialplan has to check for these
+	  conditions before using ChanIsAvail.  Simplify dialplan by making
+	  ChanIsAvail handle these conditions gracefully.
+
+	  * Made tolerate empty positions in the device list.
+
+	  * Simplified the code and eliminated some unnecessary indention.
+
+	  ASTERISK-28638
+
+	  Change-Id: I9e4b67e2cbf26b2417c2d03485b8568e898931d3
+
+2020-01-02 14:25 +0000 [e4e5e07e3d]  George Joseph <gjoseph@digium.com>
+
+	* stasis.c:  Use correct topic name in stasis_topic_pool_delete_topic
+
+	  When a topic is created for an object, its name is only
+	  <object>:<uniqueid>
+	  For example:
+	  bridge:cb68b3a8-fce7-4738-8a17-d7847562f020
+
+	  When a topic is added to a pool, its name has the pool's topic
+	  name prepended.  For example:
+	  bridge:all/bridge:cb68b3a8-fce7-4738-8a17-d7847562f020
+
+	  The topic_pool_entry's name however, is only what was passed
+	  in to stasis_topic_pool_get_topic which is
+	  bridge:cb68b3a8-fce7-4738-8a17-d7847562f020
+	  That's actually correct because the entry is qualified by the
+	  pool that's in.
+
+	  When you're ready to delete the entry from the pool, you retrieve
+	  the tropic name from the object but since it now has the pool's
+	  topic name prepended, it won't be found in the pool container.
+
+	  Fix:
+
+	  * Modified stasis_topic_pool_delete_topic() to skip past the
+	  pool topic's name, if it was prepended to the topic name,
+	  before searching the container for a pool entry.
+
+	  ASTERISK-28633
+	  Reported by: Joeran Vinzens
+
+	  Change-Id: I4396aa69dd83e4ab84c5b91b39293cfdbcf483e6
+
+2019-12-29 22:38 +0000 [f6f25601a4]  Richard Mudgett <rmudgett@digium.com>
+
+	* app_dial.c: Simplify dialplan using Dial.
+
+	  Dialplan has to be careful about passing an empty destination list or
+	  empty positions in the list.  As a result, dialplan has to check for
+	  these conditions before using Dial.  Simplify dialplan by making Dial
+	  handle these conditions gracefully.
+
+	  * Made tolerate empty positions in the dialed device list.
+
+	  * Reduced some message log levels from notice to verbose.
+
+	  ASTERISK-28638
+
+	  Change-Id: I6edc731aff451f8bdfaee5498078dd18c3a11ab9
+
+2019-12-29 20:41 +0000 [4414def9f9]  Richard Mudgett <rmudgett@digium.com>
+
+	* app_page.c: Simplify dialplan using Page.
+
+	  Dialplan has to be careful about passing an empty destination list or
+	  empty positions in the list.  As a result, dialplan has to check for
+	  these conditions before using Page.  Simplify dialplan by making Page
+	  handle these conditions gracefully.
+
+	  * Made tolerate empty positions in the paged device list.
+
+	  * Reduced some warnings associated with the 's' option to verbose
+	  messages.  The warning level for those messages really serves no purpose
+	  as that is why the 's' option exists.
+
+	  ASTERISK-28638
+
+	  Change-Id: I95b64a6d6800cd1a25279c88889314ae60fc21e3
+
+2019-12-29 18:36 +0000 [9997710f8f]  Richard Mudgett <rmudgett@digium.com>
+
+	* features.c: Make Bridge application tolerate unspecified channel.
+
+	  The Bridge application was inconsistent if the channel to bridge with is
+	  not specified.  If no parameters are given then a warning is issued and
+	  the current channel is hung up.  If options are given but no channel is
+	  specified then a warning is issued and the current channel is not hung up.
+
+	  * Made the Bridge application give a verbose message instead of a warning
+	  if the channel to bridge with is not specified and made not hang up the
+	  current channel.  As a result dialplan no longer needs to check if a
+	  channel name is passed before calling Bridge and simply needs to check the
+	  BRIDGERESULT channel variable instead.  This is something you likely want
+	  your dialplan to do anyway.
+
+	  * Fixed up L() option warning message.  It is up to the caller to
+	  determine if the channel is hung up because of the warning.  Dial() hangs
+	  up the current channel while Bridge() does not.
+
+	  Change-Id: I44349a8dc3912397f28852777de04f19e7bb9c73
+
+2019-12-29 17:48 +0000 [aed10616e5]  Richard Mudgett <rmudgett@digium.com>
+
+	* app_chanspy.c: Reduce log message level from notice to verbose.
+
+	  Change-Id: Ica5f38ccd8cdc077aef14d0c50425e0b29ac7e0a
+
+2019-12-29 17:31 +0000 [1cd2e340e0]  Richard Mudgett <rmudgett@digium.com>
+
+	* app_softhangup.c: Reduce unnecessary warning to verbose message.
+
+	  Why log a warning for something your dialplan explicitly asked for?
+
+	  Change-Id: I167b90daf4c7d75dd4b7ef94849f6cef05aa43a7
+
+2020-01-05 10:00 +0000 [430350ed53]  Sean Bright <sean.bright@gmail.com>
+
+	* res_pjsip_config_wizard: Fix change detection for wizard settings
+
+	  ast_sorcery_changeset_create() is not commutative and will fail to detect
+	  differences between two variable lists depending on what changed, so switch to
+	  ast_variable_lists_match().
+
+	  ASTERISK-28492 #close
+	  Reported by: Jean-Denis Girard
+
+	  Change-Id: I7b3256983ddfaa2138d3de92a444a53b5193a4e1
+
+2020-01-03 10:20 +0000 [0d252feab6]  Sean Bright <sean.bright@gmail.com>
+
+	* res_agi: Improve GET FULL VARIABLE documentation
+
+	  ASTERISK-28673 #close
+	  Reported by: Jonathan Harris
+
+	  Change-Id: I591afdec669622bfa19243aabec31b579652c92f
+
+2019-12-17 18:20 +0000 [c00c448c05]  snuffy <snuffy22@gmail.com>
+
+	* contrib/valgrind: Fix use of frame-level suppression
+
+	  Fix use of frame-level wildcard usage in suppression file.
+
+	  ASTERISK-27243 #close
+	  Reported-by: Richard Kenner
+
+	  Change-Id: I1c0c64c5f305d2c9aa124e11f1f64a2eec52dc51
+
+2019-08-28 05:07 +0000 [d95b719891]  Boris P. Korzun <drtr0jan@yandex.ru>
+
+	* func_odbc:  acf_odbc_read() and cli_odbc_read() unicode support
+
+	  Added ast_odbc_ast_str_SQLGetData() considers SQL_DESC_OCTET_LENGTH
+	  column attribute for correct allocating the buffer.
+
+	  ASTERISK-28497 #close
+
+	  Change-Id: I50e86c8a277996f13d4a4b9b318ece0d60b279bf
+
+2019-12-03 05:58 +0000 [72548ca9e5]  Jean Aunis <jean.aunis@prescom.fr>
+
+	* chan_sip: voice frames are no longer transmitted after emitting a COLP
+
+	  The SIP transaction state was reset when emitting an UPDATE or a re-INVITE
+	  related to a COLP, preventing RTP packets to be emitted.
+
+	  ASTERISK-28647
+
+	  Change-Id: Ie7a30fa7a97f711e7ba6cc17f221a0993d48bd8b
+
+2019-12-27 17:29 +0000 [401056fd27]  Sean Bright <sean.bright@gmail.com>
+
+	* db: Initialize condition primitive before use
+
+	  The db_init() function ultimately calls db_sync() which signals the
+	  condition before it is initialized.
+
+	  Change-Id: Id4a4e025b637bc4ac7d90557fcb71d56598892ab
+
+2019-12-22 10:07 +0000 [e8ca2af820]  Jaco Kroon <jaco@uls.co.za>
+
+	* netsock2: backport ast_sockaddr_copy_sockaddr to asterisk 13.
+
+	  This function is already present in 15, 16 and master.
+
+	  Change-Id: I491ddecdccc87620c264567c549217e48f3d4ff1
+	  Signed-off-by: Jaco Kroon <jaco@uls.co.za>
+
+2019-12-18 09:13 +0000 [6ceb4c25fb]  Sean Bright <sean.bright@gmail.com>
+
+	* config.c: Skip UTF-8 BOMs if present when reading config files
+
+	  ASTERISK-28667 #close
+
+	  Change-Id: I4767ed365c98f3e1587b7653321048a31d8a53b2
+
+2019-12-17 07:38 +0000 [8654d6cb20]  Pascal Cadotte Michaud <pcm@wazo.io>
+
+	* sip_to_pjsip.py: Fix trustrpid typo
+
+	  ASTERISK-28664 #close
+
+	  Change-Id: I6c28b1002fd7075ae0ed36f026f8c1855c9418a6
+
+2019-12-16 19:18 +0000 [c1faa9ecda]  Joshua C. Colp <jcolp@sangoma.com>
 
 	* json: Support older jansson versions.
 
@@ -35,7 +648,20 @@
 
 	  Change-Id: I6d596007ae85e8724d928865d99968f679be1142
 
-2019-12-16 06:35 +0000 [dc07f65777]  Joshua C. Colp <jcolp@sangoma.com>
+2019-12-16 15:27 +0000 [b07bccd0bd]  Frederic LE FOLL <frederic.lefoll@c-s.fr>
+
+	* app_chanisavail/cdr: ChanIsAvail sometimes fails to deactivate CDR.
+
+	  Temporary channel lifespan is very short and CDR deactivation request
+	  through ast_cdr_set_property() may happen when CDR is not available
+	  yet. Use CDR_PROP() dialplan function instead, it will first wait
+	  for pending CDR insertion requests to be processed.
+
+	  ASTERISK-28636
+
+	  Change-Id: I1cbe09e8d2169c0962c1195133ff260d291f2074
+
+2019-12-16 06:35 +0000 [7cea1c4306]  Joshua C. Colp <jcolp@sangoma.com>
 
 	* configure: Add check for MySQL client bool and my_bool type usage.
 
@@ -46,6 +672,145 @@
 	  ASTERISK-28604
 
 	  Change-Id: Id2225b3785115de074c50c123ff1a68005b4a9c7
+
+2019-12-11 18:03 +0000 [ca35de4282]  Joshua C. Colp <jcolp@sangoma.com>
+
+	* confbridge: Add support for specifying maximum sample rate.
+
+	  ConfBridge has the ability to move between different sample
+	  rates for mixing the conference bridge. Up until now there has
+	  only been the ability to set the conference bridge to mix at
+	  a specific sample rate, or to let it move between sample rates
+	  as necessary. This change adds the ability to configure a
+	  conference bridge with a maximum sample rate so it can move
+	  between sample rates but only up to the configured maximum.
+
+	  ASTERISK-28658
+
+	  Change-Id: Idff80896ccfb8a58a816e4ce9ac4ebde785963ee
+
+2019-12-13 13:46 +0000 [754fca9297]  Kevin Harwell <kharwell@digium.com>
+
+	* res_fax: wrap v21 detected Asterisk initiated negotiation with config option
+
+	  A previous patch:
+
+	  Gerrit Change-Id: I73bb24799bfe1a48adae9c034a2edbae54cc2a39
+
+	  made it so a T.38 Gateway tries to negotiate with both sides by sending T.38
+	  negotiation request to both endpoints supported T.38 versus the previous
+	  behavior of forwarding negotiation to the "other" channel once a preamble
+	  was detected.
+
+	  This had the unfortunate side effect of breaking some setups. Specifically
+	  ones that set the max datagram option on an endpoint configuration (configured
+	  max datagram was not propagated since Asterisk now initiates negotiations).
+
+	  This patch adds a configuration option, "negotiate_both", that when enabled
+	  makes it so Asterisk initiates the negotiation requests to both endpoints vs.
+	  the previous behavior of waiting, and forwarding the request.
+
+	  The default is disabled keeping with the old behavior.
+
+	  ASTERISK-28660
+
+	  Change-Id: I5deb875f3485e20bc75119ec743090655d864a1a
+
+2019-12-12 13:26 +0000 [22f9c57f43]  Stanislav <stas.abramenkov@gmail.com>
+
+	* app_voicemail: warning when is compiling
+
+	  Change-Id: Ib53eba1a66e25fbeba61c620bd3edd462f699ada
+
+	  ASTERISK-28628
+
+	  Change-Id: Ib53eba1a66e25fbeba61c620bd3edd462f699ada
+
+2019-12-11 10:52 +0000 [644ae311bb]  Pascal Cadotte Michaud <pcm@wazo.io>
+
+	* PJSIP_CONTACT: add missing argument documentation
+
+	  add missing argument "rtt" and "status" to the documentation
+
+	  The change to the dtd file allow an enumlist to contain one or many
+	  configOptionToEnum or enum.
+
+	  This is different from the previous patch I submitted when you could have a
+	  configOptionToEnum or (a configOptionToEnum followed by one or manu enums) or
+	  (one or many enums)
+
+	  ASTERISK-28626
+
+	  Change-Id: Ia71743ee7ec813f40297b0ddefeee7909db63b6d
+
+2019-12-04 08:35 +0000 [72d51ab8f5]  Jaco Kroon <jaco@uls.co.za>
+
+	* chan_sip:  in case of tcp/tls, be less annoying about tx errors.
+
+	  chan_sip.c:3782 __sip_xmit: sip_xmit of 0x7f1478069230 (len 600) to
+	  213.150.203.60:1492 returned -2: Interrupted system call
+
+	  returned -2 implies this wasn't actually an OS error, so errno makes no
+	  sense either.  Internal error was already logged higher up, and -2
+	  generally means that either there isn't a valid connection available, or
+	  the pipe notification failed, and that is already correctly logged.
+
+	  ASTERISK-28651 #close
+
+	  Change-Id: I46eb82924beeff9dfd86fa6c7eb87d2651b950f2
+	  Signed-off-by: Jaco Kroon <jaco@uls.co.za>
+
+2019-08-25 21:20 +0000 [02576bfef7]  George Joseph <gjoseph@digium.com>
+
+	* res_pjsip_nat: Restore original contact for REGISTER responses
+
+	  RFC3261 Section 10 "Registrations", specifically paragraph
+	  "10.2.4: Refreshing Bindings", states that a user agent compares
+	  each contact address (in a 200 REGISTER response) to see if it
+	  created the contact.  If the Asterisk endpoint has the
+	  rewrite_contact option set however, the contact host and port sent
+	  back in the 200 response will be the rewritten one and not the
+	  one sent by the user agent.  This prevents the user agent from
+	  matching its own contact.  Some user agents get very upset when
+	  this happens and will not consider the registration successful.
+	  While this is rare, it is acceptable behavior especially if more
+	  than 1 user agent is allowed to register to a single endpoint/aor.
+
+	  This commit updates res_pjsip_nat (where rewrite_contact is
+	  implemented) to store the original incoming Contact header in
+	  a new "x-ast-orig-host" URI parameter before rewriting it, and to
+	  restore the original host and port to the Contact headers in the
+	  outgoing response.
+
+	  This is only done if the request is a REGISTER and rewrite_contact
+	  is enabled.
+
+	  pjsip_message_filter was also updated to ensure that if a request
+	  comes in with any existing x-ast-* URI parameters, we remove them
+	  so they don't conflict.  Asterisk will never send a request
+	  with those headers in it but someone might just decide to add them
+	  to a request they craft and send to Asterisk.
+
+	  NOTE: If a device changes its contact address and registers again,
+	  it's a NEW registration.  If the device didn't unregister the
+	  original registration then all existing behavior based
+	  on aor/remove_existing and aor/max_contacts apply.
+
+	  ASTERISK-28502
+	  Reported-by: Ross Beer
+
+	  Change-Id: Idc263ad2d2d7bd8faa047e5804d96a5fe1cd282e
+
+2019-12-04 02:35 +0000 [6e79028020]  Jaco Kroon <jaco@uls.co.za>
+
+	* ACL: ast_apply_acl_nolog - identical to ast_apply_acl but without logging.
+
+	  Due to use in res_rtp_asterisk there is a need to be able to apply an
+	  ACL without logging any invalid/denies.  It's probably sensible to at
+	  least validate the ACL once directly after load and report invalid ACLs.
+
+	  Change-Id: I256169229d945ca7c1bbf228fc492d91df345843
+	  Signed-off-by: Jaco Kroon <jaco@uls.co.za>
 
 2019-12-12 11:09 +0000  Asterisk Development Team <asteriskteam@digium.com>
 
