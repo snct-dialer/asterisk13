@@ -11195,9 +11195,12 @@ process_sdp_cleanup:
 
 static int process_sdp_o(const char *o, struct sip_pvt *p)
 {
+	const char *o_copy_start;
 	char *o_copy;
 	char *token;
-	int64_t rua_version;
+	int offset;
+	int64_t sess_version;
+	char unique[128];
 
 	/* Store the SDP version number of remote UA. This will allow us to
 	distinguish between session modifications and session refreshes. If
@@ -11215,35 +11218,49 @@ static int process_sdp_o(const char *o, struct sip_pvt *p)
 		return FALSE;
 	}
 
-	o_copy = ast_strdupa(o);
-	token = strsep(&o_copy, " ");  /* Skip username   */
+	/* o=<username> <sess-id> <sess-version> <nettype> <addrtype>
+           <unicast-address> */
+
+	o_copy_start = o_copy = ast_strdupa(o);
+	token = strsep(&o_copy, " ");  /* Skip username */
 	if (!o_copy) {
 		ast_log(LOG_WARNING, "SDP syntax error in o= line username\n");
 		return FALSE;
 	}
-	token = strsep(&o_copy, " ");  /* Skip session-id */
+	token = strsep(&o_copy, " ");  /* sess-id */
 	if (!o_copy) {
-		ast_log(LOG_WARNING, "SDP syntax error in o= line session-id\n");
+		ast_log(LOG_WARNING, "SDP syntax error in o= line sess-id\n");
 		return FALSE;
 	}
-	token = strsep(&o_copy, " ");  /* Version         */
-	if (!o_copy) {
-		ast_log(LOG_WARNING, "SDP syntax error in o= line\n");
-		return FALSE;
-	}
-	if (!sscanf(token, "%30" SCNd64, &rua_version)) {
-		ast_log(LOG_WARNING, "SDP syntax error in o= line version\n");
+	token = strsep(&o_copy, " ");  /* sess-version */
+	if (!o_copy || !sscanf(token, "%30" SCNd64, &sess_version)) {
+		ast_log(LOG_WARNING, "SDP syntax error in o= line sess-version\n");
 		return FALSE;
 	}
 
-	/* we need to check the SDP version number the other end sent us;
+	/* Copy all after sess-version on top of sess-version into unique.
+	 * <sess-id> is a numeric string such that the tuple of <username>,
+         * <sess-id>, <nettype>, <addrtype>, and <unicast-address> forms a
+         * globally unique identifier for the session.
+	 * I.e. all except the <sess-version> */
+	ast_copy_string(unique, o, sizeof(unique)); /* copy all of o= contents */
+	offset = (o_copy - o_copy_start); /* after sess-version */
+	if (offset < sizeof(unique)) {
+		/* copy all after sess-version on top of sess-version */
+		int sess_version_start = token - o_copy_start;
+		ast_copy_string(unique + sess_version_start, o + offset, sizeof(unique) - sess_version_start);
+	}
+
+	/* We need to check the SDP version number the other end sent us;
 	 * our rules for deciding what to accept are a bit complex.
 	 *
 	 * 1) if 'ignoresdpversion' has been set for this dialog, then
 	 *    we will just accept whatever they sent and assume it is
 	 *    a modification of the session, even if it is not
 	 * 2) otherwise, if this is the first SDP we've seen from them
-	 *    we accept it
+	 *    we accept it;
+	 *    note that _them_ may change, in which case the
+	 *    sessionunique_remote will be different
 	 * 3) otherwise, if the new SDP version number is higher than the
 	 *    old one, we accept it
 	 * 4) otherwise, if this SDP is in response to us requesting a switch
@@ -11253,14 +11270,25 @@ static int process_sdp_o(const char *o, struct sip_pvt *p)
 	 *    not request a switch to T.38, then we stop parsing the SDP, as it
 	 *    has not changed from the previous version
 	 */
+	if (sip_debug_test_pvt(p)) {
+		if (ast_strlen_zero(p->sessionunique_remote)) {
+			ast_verbose("Got SDP version %" PRId64 " and unique parts [%s]\n",
+					sess_version, unique);
+		} else {
+			ast_verbose("Comparing SDP version %" PRId64 " -> %" PRId64 " and unique parts [%s] -> [%s]\n",
+					p->sessionversion_remote, sess_version, p->sessionunique_remote, unique);
+		}
+	}
 
 	if (ast_test_flag(&p->flags[1], SIP_PAGE2_IGNORESDPVERSION) ||
-	    (p->sessionversion_remote < 0) ||
-	    (p->sessionversion_remote < rua_version)) {
-		p->sessionversion_remote = rua_version;
+			sess_version > p->sessionversion_remote ||
+			strcmp(unique, S_OR(p->sessionunique_remote, ""))) {
+		p->sessionversion_remote = sess_version;
+		ast_string_field_set(p, sessionunique_remote, unique);
 	} else {
 		if (p->t38.state == T38_LOCAL_REINVITE) {
-			p->sessionversion_remote = rua_version;
+			p->sessionversion_remote = sess_version;
+			ast_string_field_set(p, sessionunique_remote, unique);
 			ast_log(LOG_WARNING, "Call %s responded to our T.38 reinvite without changing SDP version; 'ignoresdpversion' should be set for this peer.\n", p->callid);
 		} else {
 			p->session_modify = FALSE;
@@ -19455,6 +19483,54 @@ static int check_user(struct sip_pvt *p, struct sip_request *req, int sipmethod,
 	return check_user_full(p, req, sipmethod, uri, reliable, addr, NULL);
 }
 
+static void send_check_user_failure_response(struct sip_pvt *p, struct sip_request *req, int res, enum xmittype reliable)
+{
+	const char *response;
+
+	switch (res) {
+	case AUTH_SECRET_FAILED:
+	case AUTH_USERNAME_MISMATCH:
+	case AUTH_NOT_FOUND:
+	case AUTH_UNKNOWN_DOMAIN:
+	case AUTH_PEER_NOT_DYNAMIC:
+	case AUTH_BAD_TRANSPORT:
+		ast_log(LOG_NOTICE, "Failed to authenticate device %s for %s, code = %d\n",
+			sip_get_header(req, "From"), sip_methods[p->method].text, res);
+		response = "403 Forbidden";
+		break;
+	case AUTH_SESSION_LIMIT:
+		/* Unexpected here, actually. As it's handled elsewhere. */
+		ast_log(LOG_NOTICE, "Call limit reached for device %s for %s, code = %d\n",
+			sip_get_header(req, "From"), sip_methods[p->method].text, res);
+		response = "480 Temporarily Unavailable";
+		break;
+	case AUTH_RTP_FAILED:
+		/* We don't want to send a 403 in the RTP_FAILED case.
+		 * The cause could be any one of:
+		 * - out of memory or rtp ports
+		 * - dtls/srtp requested but not loaded/invalid
+		 * Neither of them warrant a 403. A 503 makes more
+		 * sense, as this node is broken/overloaded. */
+		ast_log(LOG_NOTICE, "RTP init failure for device %s for %s, code = %d\n",
+			sip_get_header(req, "From"), sip_methods[p->method].text, res);
+		response = "503 Service Unavailable";
+		break;
+	case AUTH_SUCCESSFUL:
+	case AUTH_CHALLENGE_SENT:
+		/* These should have been handled elsewhere. */
+	default:
+		ast_log(LOG_NOTICE, "Unexpected error for device %s for %s, code = %d\n",
+			sip_get_header(req, "From"), sip_methods[p->method].text, res);
+		response = "503 Service Unavailable";
+	}
+
+	if (reliable == XMIT_RELIABLE) {
+		transmit_response_reliable(p, response, req);
+	} else if (reliable == XMIT_UNRELIABLE) {
+		transmit_response(p, response, req);
+	}
+}
+
 static int set_message_vars_from_req(struct ast_msg *msg, struct sip_request *req)
 {
 	size_t x;
@@ -19571,8 +19647,7 @@ static void receive_message(struct sip_pvt *p, struct sip_request *req, struct a
 			return;
 		}
 		if (res < 0) { /* Something failed in authentication */
-			ast_log(LOG_NOTICE, "Failed to authenticate device %s\n", sip_get_header(req, "From"));
-			transmit_response(p, "403 Forbidden", req);
+			send_check_user_failure_response(p, req, res, XMIT_UNRELIABLE);
 			sip_scheddestroy(p, DEFAULT_TRANS_TIMEOUT);
 			return;
 		}
@@ -25610,8 +25685,7 @@ static int handle_request_options(struct sip_pvt *p, struct sip_request *req, st
 			return 0;
 		}
 		if (res < 0) { /* Something failed in authentication */
-			ast_log(LOG_NOTICE, "Failed to authenticate device %s\n", sip_get_header(req, "From"));
-			transmit_response(p, "403 Forbidden", req);
+			send_check_user_failure_response(p, req, res, XMIT_UNRELIABLE);
 			sip_scheddestroy(p, DEFAULT_TRANS_TIMEOUT);
 			return 0;
 		}
@@ -26404,8 +26478,7 @@ static int handle_request_invite(struct sip_pvt *p, struct sip_request *req, str
 			goto request_invite_cleanup;
 		}
 		if (res < 0) { /* Something failed in authentication */
-			ast_log(LOG_NOTICE, "Failed to authenticate device %s\n", sip_get_header(req, "From"));
-			transmit_response_reliable(p, "403 Forbidden", req);
+			send_check_user_failure_response(p, req, res, XMIT_RELIABLE);
 			p->invitestate = INV_COMPLETED;
 			sip_scheddestroy(p, DEFAULT_TRANS_TIMEOUT);
 			goto request_invite_cleanup;
@@ -28125,8 +28198,7 @@ static int handle_request_publish(struct sip_pvt *p, struct sip_request *req, st
 		p->lastinvite = seqno;
 		return 0;
 	} else if (auth_result < 0) {
-		ast_log(LOG_NOTICE, "Failed to authenticate device %s\n", sip_get_header(req, "From"));
-		transmit_response(p, "403 Forbidden", req);
+		send_check_user_failure_response(p, req, auth_result, XMIT_UNRELIABLE);
 		sip_scheddestroy(p, DEFAULT_TRANS_TIMEOUT);
 		ast_string_field_set(p, theirtag, NULL);
 		return 0;
@@ -28348,9 +28420,7 @@ static int handle_request_subscribe(struct sip_pvt *p, struct sip_request *req, 
 		if (res == AUTH_CHALLENGE_SENT)	/* authpeer = NULL here */
 			return 0;
 		if (res != AUTH_SUCCESSFUL) {
-			ast_log(LOG_NOTICE, "Failed to authenticate device %s for SUBSCRIBE\n", sip_get_header(req, "From"));
-			transmit_response(p, "403 Forbidden", req);
-
+			send_check_user_failure_response(p, req, res, XMIT_UNRELIABLE);
 			pvt_set_needdestroy(p, "authentication failed");
 			return 0;
 		}

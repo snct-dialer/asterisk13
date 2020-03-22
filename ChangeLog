@@ -1,30 +1,342 @@
-2020-02-04 14:50 +0000  Asterisk Development Team <asteriskteam@digium.com>
+2020-03-12 14:37 +0000  Asterisk Development Team <asteriskteam@digium.com>
 
-	* asterisk 13.31.0 Released.
+	* asterisk 13.32.0 Released.
 
-2020-01-30 16:33 +0000  Asterisk Development Team <asteriskteam@digium.com>
+2020-03-05 17:28 +0000  Asterisk Development Team <asteriskteam@digium.com>
 
-	* asterisk 13.31.0-rc2 Released.
+	* asterisk 13.32.0-rc1 Released.
 
-2020-01-27 11:44 +0000 [fb7a668d69]  Kevin Harwell <kharwell@digium.com>
+2020-03-05 11:20 +0000 [077cc24d66]  Asterisk Development Team <asteriskteam@digium.com>
 
-	* res_stasis: trigger cleanup after update
+	* Update CHANGES and UPGRADE.txt for 13.32.0
+2020-03-03 10:57 +0000 [4b242d4280]  lvl <digium@lvlconsultancy.nl>
 
-	  The cleanup code in stasis shuts down applications if they are in a deactivated
-	  state, and no longer have explicit subscriptions. When registering an app the
-	  cleanup code was running before calling 'update'. When it should be executed
-	  after 'update' since a call to register may re-activate the app. We don't want
-	  it to shutdown before the 'update' otherwise the app won't be re-activated,
-	  or registered.
+	* res_pjsip_refer: ensure refer progress is still sent after Proceeding()
 
-	  This patch makes it so the cleanup code is executed post 'update'.
+	  ASTERISK-28766 #close
 
-	  ASTERISK-28679 #close
+	  Change-Id: I5ce2210062f9325db762edbf6e46075079bb2cd1
 
-	  Change-Id: I8f2c0b17e33bb8128441567b97fd4c7bf74a327b
-	  (cherry picked from commit 1051227dd96341f6e149739c1465b2e763cc67ea)
+2020-01-12 05:37 +0000 [d6b5a18111]  Sebastian Kemper <sebastian_ml@gmx.net>
 
-2020-01-27 12:01 +0000 [2cacc1e7f8]  Kevin Harwell <kharwell@digium.com>
+	* check_expr2: fix cross-compile/hardening issues
+
+	  When building check_expr2 with ASLR PIE hardening enabled the linker
+	  fails. This is resolved by adding the regular compiler flags when
+	  building the object files from ast_expr2f.c and ast_expr2.c.
+
+	  Note: The STANDALONE define is removed because it is already defined in
+	  _ASTCFLAGS. YY_NO_INPUT is defined so that the compile survives
+	  '--enable-dev-mode'.
+
+	  Also, a Makefile variable "CROSS_COMPILING" is added so that the
+	  build system doesn't try to run check_expr2 when cross-compiling,
+	  because that will fail the build as will.
+
+	  ASTERISK-28685 #close
+
+	  Signed-off-by: Sebastian Kemper <sebastian_ml@gmx.net>
+	  Change-Id: If435b7db9f9ad8266245bda51c81c220f9658915
+
+2020-02-28 12:53 +0000 [0fb06121cb]  Kevin Harwell <kharwell@digium.com>
+
+	* message & stasis/messaging: make text message variables work in ARI
+
+	  When a text message was received any associated variable was not written to
+	  the ARI TextMessageReceived event. This occurred because Asterisk only wrote
+	  out "send" variables. However, even those "send" variables would fail ARI
+	  validation due to a TextMessageVariable formatting bug.
+
+	  Since it seems the TextMessageReceived event has never been able to include
+	  actual variables it was decided to remove the TextMessageVariable object type
+	  from ARI, and simply return a JSON object of key/value pairs for variables.
+	  This aligns more with how the ARI sendMessage handles variables, and other
+	  places in ARI.
+
+	  That being the case, and since this is technically an API breaking change (no
+	  one should really be affected since things never really worked) the ARI version
+	  was updated to reflect that.
+
+	  ASTERISK-28755 #close
+
+	  Change-Id: Ia6051c01a53b30cf7edef84c27df4ed4479b8b6f
+
+2020-02-24 09:00 +0000 [ed670ca0c6]  Torrey Searle <torrey@voxbone.com>
+
+	* res/res_pjsip_sdp_rtp: Fix MOH transitions
+
+	  Update the state of remote_hold immediately on receipt of remote
+	  SDP so that the information is available when building the SDP
+	  answer
+
+	  ASTERISK-28754 #close
+
+	  Change-Id: I7026032a807e9c95081cb8f060400b05deb4836f
+
+2020-02-25 10:09 +0000 [c3e9d37ce7]  Walter Doekes <walter+asterisk@wjd.nu>
+
+	* say: Remove unused "plural" option from main/say
+
+	  There are exceptions for plural objects, but they are detected using the
+	  supplied NUMBER, not using an extra option.
+
+	  Change-Id: I95d1d1b2796b1aba92048a2dbae8a3856ed8a113
+
+2020-02-25 10:05 +0000 [6995b0a8fa]  Walter Doekes <walter+asterisk@wjd.nu>
+
+	* app_queue: Refactor odd placement of if's around say_position
+
+	  Change-Id: Icba97905e331812f129e5966e91a59b104c7a748
+
+2020-02-24 12:44 +0000 [d13cd25d4c]  Kevin Harwell <kharwell@digium.com>
+
+	* format_cap: make function parameters 'const'
+
+	  There were a couple places where the format cap function parameter was not
+	  'const' when it should have been. This patch makes them 'const'.
+
+	  Change-Id: Ife753fb16a962d842a6b44f45363a61a66bfdb2e
+
+2020-02-20 06:52 +0000 [2ff7057287]  Jaco Kroon <jaco@uls.co.za>
+
+	* addons/res_config_mysql: silense warnings about printf format errors.
+
+	  Warnings without this:
+
+	  res_config_mysql.c: In function 'update2_mysql':
+	  res_config_mysql.c:741:15: warning: format '%llu' expects argument of type
+	      'long long unsigned int', but argument 6 has type 'my_ulonglong'
+	      {aka 'long unsigned int'} [-Wformat=]
+	  ast_debug(1, "MySQL RealTime: Updated %llu rows on table: %s\n",
+	      numrows, tablename);
+
+	  (reformatted for readability within line-wrap)
+
+	  Change-Id: I2af4d419a37c1a7eeee750cf9ae4a9a2b3a37fd3
+
+2020-02-19 13:20 +0000 [cbbf192f0a]  Sean Bright <sean.bright@gmail.com>
+
+	* tcptls.c: Log more informative OpenSSL errors
+
+	  Dump OpenSSL's error stack to the error log when things fail.
+
+	  ASTERISK-28750 #close
+	  Reported by: Martin Zeh
+
+	  Change-Id: Ib63cd0df20275586e68ac4c2ddad222ed7bd9c0a
+
+2020-02-19 08:38 +0000 [66388abbb1]  Sean Bright <sean.bright@gmail.com>
+
+	* ast_tls_cert: Allow private key size to be set on command line
+
+	  The default size in release branches will be 1024 but we'll use 2048 in master.
+
+	  ASTERISK~28750
+
+	  Change-Id: I435cea18bdd58824ed2b55259575c7ec7133842a
+
+2020-01-23 13:17 +0000 [f928600a98]  Ben Ford <bford@digium.com>
+
+	* RTP/ICE: Send on first valid pair.
+
+	  When handling ICE negotiations, it's possible that there can be a delay
+	  between STUN binding requests which in turn will cause a delay in ICE
+	  completion, preventing media from flowing. It should be possible to send
+	  media when there is at least one valid pair, preventing this scenario
+	  from occurring.
+
+	  A change was added to PJPROJECT that adds an optional callback
+	  (on_valid_pair) that will be called when the first valid pair is found
+	  during ICE negotiation. Asterisk uses this to start the DTLS handshake,
+	  allowing media to flow. It will only be called once, either on the first
+	  valid pair, or when ICE negotiation is complete.
+
+	  ASTERISK-28716
+
+	  Change-Id: Ia7b68c34f06d2a1d91c5ed51627b66fd0363d867
+
+2020-02-18 07:10 +0000 [a60071610c]  Joshua C. Colp <jcolp@sangoma.com>
+
+	* pjsip: Update ACLs on named ACL changes.
+
+	  This change extends the Sorcery API to allow a wizard to be
+	  told to explicitly reload objects or a specific object type
+	  even if the wizard believes that nothing has changed.
+
+	  This has been leveraged by res_pjsip and res_pjsip_acl to
+	  reload endpoints and PJSIP ACLs when a named ACL changes.
+
+	  ASTERISK-28697
+
+	  Change-Id: Ib8fee9bd9dd490db635132c479127a4114c1ca0b
+
+2020-02-17 08:05 +0000 [0246bca581]  Sean Bright <sean.bright@gmail.com>
+
+	* app_mixmonitor: Set MIXMONITOR_FILENAME to correct value when wav49 is used
+
+	  When opening a file for writing, Asterisk silently converts filenames
+	  ending with 'wav49' to 'WAV.' We aren't taking that in to account when
+	  setting the MIXMONITOR_FILENAME variable in MixMonitor.
+
+	  * If the user wants to write to a wav49 file, make sure that it is
+	    reflected properly in MIXMONITOR_FILENAME.
+
+	  * Add a note to the documentation describing this behavior.
+
+	  * Add a note in main/file.c indicating that app_mixmonitor needs to be
+	    changed if the logic in build_filename was changed.
+
+	  ASTERISK-24798 #close
+	  Reported by: xrobau
+
+	  Change-Id: I384691ce624eb55c80a125b9ca206d2d691c574c
+
+2020-02-12 10:05 +0000 [21ed671893]  Torrey Searle <torrey@voxbone.com>
+
+	* res_pjsip_sdp_rtp: implement hold state handling on moh_passthrough
+
+	  When moh_passthrough is used, asterisk is only generating invites
+	  of type sendonly and sendrecv instead of taking fully into account
+	  the on hold state of the local and remote parties
+
+	  ASTERISK-28738 #close
+
+	  Change-Id: Iaaad9fbc033cb14803d433b8a4071bc337047761
+
+2020-02-11 07:46 +0000 [7687d1bda5]  Sean Bright <sean.bright@gmail.com>
+
+	* res_musiconhold: Avoid spurious warning when 'format' is the empty string
+
+	  The change to res_config_odbc that allowed empty strings to be
+	  returned to realtime consumers¹ causes a warning to be emitted when
+	  loading MoH classes. So we need to treat an empty 'format' as if it
+	  was not specified to avoid the warning.
+
+	  ASTERISK-28735 #close
+	  Reported by: Ross Beer
+
+	  [1] https://gerrit.asterisk.org/c/asterisk/+/13722
+
+	  Change-Id: I9a271d721e1a0973e80ebe7d75b46a0d8fa0e5a5
+
+2020-02-10 15:40 +0000 [ea1f318534]  Sean Bright <sean.bright@gmail.com>
+
+	* func_odbc: Prevent snprintf() truncation warning
+
+	  For reasons that are not clear to me - this only appears for me when
+	  _not_ building in dev-mode.
+
+	  Change-Id: Ib45c54daaea8e0d571cb470cab1daaae2edba968
+
+2020-02-07 13:44 +0000 [74d0244dc3]  George Joseph <gjoseph@digium.com>
+
+	* doc: Fix CHANGES entries to have .txt suffix and update READMEs
+
+	  Although the wiki page for the new CHANGES and UPGRADE scheme
+	  states that the files must have the ".txt" suffix, the READMEs
+	  didn't.
+
+	  Change-Id: I490306aa2cc24d6f014738e9ebbc78592efe0f05
+	  (cherry picked from commit 7416703f04f12eb583a3427a3f64d06951c18c6e)
+
+2020-01-16 09:50 +0000 [d5fa23e72a]  Sean Bright <sean.bright@gmail.com>
+
+	* pjproject_bundled: Allow brackets in via parameters
+
+	  ASTERISK-26955 #close
+	  Reported by: Peter Sokolov
+
+	  Change-Id: Ib2803640905a77b65d0cee2d0ed2c7b310d470ac
+
+2020-02-05 02:26 +0000 [9419295aee]  Sylvain Afchain <safchain@gmail.com>
+
+	* install_prereq: Install aptitude non-interactively
+
+	  Currently aptitude is installed using interactive mode. This patch
+	  changes this to use the non-interactive mode as it can block
+	  automatic dependencies installation, ex: CI, Docker build.
+
+	  ASTERISK-28726 #close
+
+	  Change-Id: I271ee00d230513a6f044810351a32d83b2181133
+	  (cherry picked from commit 0c02d0a4500cbd4f657c26eb609928c110ebccb9)
+
+2020-01-31 06:58 +0000 [44e1c7d93f]  Walter Doekes <walter+asterisk@wjd.nu>
+
+	* chan_sip: Return 503 if we're out of RTP ports
+
+	  If you're for some reason out of RTP ports, chan_sip would previously
+	  responde to an INVITE with a 403, which will fail the call.
+
+	  Now, it returns a 503, allowing the device/proxy to retry the call on a
+	  different machine.
+
+	  ASTERISK-28718
+
+	  Change-Id: I968dcf6c1e30ecddcce397dcda36db727c83ca90
+
+2020-01-28 02:34 +0000 [cea6cad343]  Walter Doekes <walter+asterisk@wjd.nu>
+
+	* chan_sip: Clarify in sample docs how directmediapermit/-acl should be used
+
+	  It said "restrict [...] which peers should be able to pass [audio]
+	  to each other".
+
+	  However, these settings are not global (for which you would expect
+	  signaling IPs to be checked). These settings are available per peer
+	  only, and the IPs being checked, are the RTP IPs.
+
+	  Change-Id: I2a6c6cd7c2f5f30d1df4844e3e0308a077021660
+
+2020-01-29 08:57 +0000 [a3a2fbaec6]  Sean Bright <sean.bright@gmail.com>
+
+	* res_config_odbc: Preserve empty strings returned by the database
+
+	  When res_config_odbc (and perhaps other realtime backends) reads a SQL
+	  NULL from the database, it coalesces the value to the empty string
+	  which prevents it from being returned to the realtime core.
+
+	  However, if it instead reads the empty string from the database, it
+	  needs a way to encode that fact without having the value omitted
+	  entirely. It does this by changing the value to a string with a single
+	  space. The realtime code in main/config.c recognizes this special case
+	  and _turns the string back into the empty string_ before passing it to
+	  realtime API consumers.
+
+	  For all of this to work, we need to ensure that we actually pass the
+	  single-space-string back to the realtime core, which is currently
+	  failing because we are trimming the value before checking its
+	  content. So instead we now special case the single-space-string case
+	  so that empty values are returned properly.
+
+	  ASTERISK-28719 #close
+	  Reported by: EDV O-TON
+
+	  Change-Id: I673ed8c31ad037aa224e80c78c7a1dc4e4a4e3de
+
+2020-01-28 09:18 +0000 [e14fd3b22a]  Joshua C. Colp <jcolp@sangoma.com>
+
+	* res_pjsip_pubsub: Increment persistence data ref when recreating.
+
+	  Each subscription needs to have a reference to the persisted data
+	  for it, as well as the main JSON contained within the tree. When
+	  recreating a subscription this did not occur and they both shared
+	  the same reference.
+
+	  ASTERISK-28714
+
+	  Change-Id: I706abd49ea182ea367a4ac3feca2706460ae9f4a
+
+2020-01-27 19:58 +0000 [dafdcc623c]  Sean Bright <sean.bright@gmail.com>
+
+	* res_pjsip_messaging: Allow Content-Type to be overridden
+
+	  ASTERISK-26082 #close
+	  Reported by: Alex
+
+	  Change-Id: I6549e90932016349bc72b0f053432dc25286f4fb
+
+2020-01-27 12:01 +0000 [78d9bc8ef6]  Kevin Harwell <kharwell@digium.com>
 
 	* stasis/app: don't lock an app before a call to send
 
@@ -40,21 +352,77 @@
 	  ASTERISK-28423 #close
 
 	  Change-Id: I6767c6d0933c7db1b984018966eefca4c0638a27
-	  (cherry picked from commit 78d9bc8ef66e2d20925daf0eb597cf8a956e1029)
 
-2020-01-28 09:18 +0000 [5def6d7e17]  Joshua C. Colp <jcolp@sangoma.com>
+2020-01-27 11:44 +0000 [1051227dd9]  Kevin Harwell <kharwell@digium.com>
 
-	* res_pjsip_pubsub: Increment persistence data ref when recreating.
+	* res_stasis: trigger cleanup after update
 
-	  Each subscription needs to have a reference to the persisted data
-	  for it, as well as the main JSON contained within the tree. When
-	  recreating a subscription this did not occur and they both shared
-	  the same reference.
+	  The cleanup code in stasis shuts down applications if they are in a deactivated
+	  state, and no longer have explicit subscriptions. When registering an app the
+	  cleanup code was running before calling 'update'. When it should be executed
+	  after 'update' since a call to register may re-activate the app. We don't want
+	  it to shutdown before the 'update' otherwise the app won't be re-activated,
+	  or registered.
 
-	  ASTERISK-28714
+	  This patch makes it so the cleanup code is executed post 'update'.
 
-	  Change-Id: I706abd49ea182ea367a4ac3feca2706460ae9f4a
-	  (cherry picked from commit e14fd3b22a832f1e49fbdf340727c12f0c0d2929)
+	  ASTERISK-28679 #close
+
+	  Change-Id: I8f2c0b17e33bb8128441567b97fd4c7bf74a327b
+
+2020-01-27 08:03 +0000 [d99580ae69]  Sean Bright <sean.bright@gmail.com>
+
+	* res_pjsip_messaging: Ensure MESSAGE_SEND_STATUS is set properly
+
+	  We need to wait for the message sending callback to finish to know if
+	  we succeeded or failed.
+
+	  ASTERISK-25421 #close
+	  Reported by:  Dmitriy Serov
+
+	  Change-Id: I22b954398821d2caf4c6fe58f0607c8cfa378059
+
+2019-12-27 07:04 +0000 [bfc93cc954]  Sean Bright <sean.bright@gmail.com>
+
+	* chan_pjsip: Ignore RTP that we haven't negotiated
+
+	  If chan_pjsip receives an RTP packet whose payload differs from the
+	  channel's native format, and asymmetric_rtp_codec is disabled (the
+	  default), Asterisk will switch the channel's native format to match
+	  that of the incoming packet without regard to the negotiated payloads.
+
+	  We now keep track of the formats that have been negotiated and check
+	  before switching payloads which results in these packets being dropped
+	  instead of causing the session to terminate.
+
+	  ASTERISK-28139 #close
+	  Reported by: Paul Brooks
+
+	  Change-Id: Icc3b85cee1772026cee5dc1b68459bf9431c14a3
+
+2020-01-13 04:13 +0000 [e99f70f112]  Walter Doekes <walter+asterisk@wjd.nu>
+
+	* chan_sip: Always process updated SDP on media source change
+
+	  Fixes no-audio issues when the media source is changed and
+	  strictrtp is enabled (default).
+
+	  If the peer media source changes, the SDP session version also changes.
+	  If it is lower than the one we had stored, chan_sip would ignore it.
+
+	  This changeset keeps track of the remote media origin identifier,
+	  comparing that as well. If it changes, the session version needn't be
+	  higher for us to accept the SDP.
+
+	  Common scenario where this would've caused problems: a separate media
+	  gateway that informs the caller about premium rates before handing off
+	  the call to the final destination.
+
+	  (An alternative fix would be to set ignoresdpversion=yes on the peer.)
+
+	  ASTERISK-28686
+
+	  Change-Id: I88fdbc5aeb777b583e7738c084254c482a7776ee
 
 2020-01-23 16:23 +0000  Asterisk Development Team <asteriskteam@digium.com>
 
