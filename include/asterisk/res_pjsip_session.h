@@ -89,6 +89,8 @@ struct ast_sip_session_media {
 	unsigned int remote_rtcp_mux:1;
 	/*! \brief Does remote support ice */
 	unsigned int remote_ice:1;
+	/*! \brief Stream is held by remote side changed during this negotiation*/
+	unsigned int remotely_held_changed:1;
 	/*! \brief Stream type this session media handles */
 	char stream_type[1];
 };
@@ -167,6 +169,8 @@ struct ast_sip_session {
 	enum ast_sip_dtmf_mode dtmf;
 	/*! Initial incoming INVITE Request-URI.  NULL otherwise. */
 	pjsip_uri *request_uri;
+	/*! Joint capabilities */
+	struct ast_format_cap *joint_caps;
 };
 
 typedef int (*ast_sip_session_request_creation_cb)(struct ast_sip_session *session, pjsip_tx_data *tdata);
