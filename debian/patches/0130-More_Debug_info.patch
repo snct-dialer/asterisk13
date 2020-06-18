@@ -1,0 +1,15 @@
+Index: trunk/main/file.c
+===================================================================
+--- trunk.orig/main/file.c
++++ trunk/main/file.c
+@@ -256,7 +256,9 @@ int ast_writestream(struct ast_filestrea
+ 				/* the translator may have returned multiple frames, so process them */
+ 				for (cur = trf; cur; cur = AST_LIST_NEXT(cur, frame_list)) {
+ 					if ((res = fs->fmt->write(fs, trf))) {
+-						ast_log(LOG_WARNING, "Translated frame write failed\n");
++						ast_log(LOG_WARNING, "1: Translated frame write failed\n");
++						ast_log(LOG_WARNING, "2: Translate to format %s from source format %s\n",
++							fs->fmt->name, ast_format_get_name(f->subclass.format));
+ 						break;
+ 					}
+ 				}
