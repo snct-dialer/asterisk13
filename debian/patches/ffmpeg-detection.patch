@@ -13,7 +13,7 @@ Index: trunk/configure.ac
 ===================================================================
 --- trunk.orig/configure.ac
 +++ trunk/configure.ac
-@@ -486,7 +486,7 @@ AST_EXT_LIB_SETUP([CRYPTO], [OpenSSL Cry
+@@ -484,7 +484,7 @@ AST_EXT_LIB_SETUP([CRYPTO], [OpenSSL Cry
  AST_EXT_LIB_SETUP_OPTIONAL([OPENSSL_SRTP], [OpenSSL SRTP Extension Support], [CRYPTO], [crypto])
  AST_EXT_LIB_SETUP_OPTIONAL([OPENSSL_BIO_METHOD], [OpenSSL BIO Method Support], [CRYPTO], [crypto])
  AST_EXT_LIB_SETUP([DAHDI], [DAHDI], [dahdi])
@@ -22,7 +22,7 @@ Index: trunk/configure.ac
  AST_EXT_LIB_SETUP([GSM], [External GSM], [gsm], [, use 'internal' GSM otherwise])
  AST_EXT_LIB_SETUP([ILBC], [System iLBC], [ilbc], [, use 'internal' iLBC otherwise])
  AST_EXT_LIB_SETUP([GTK2], [gtk2], [gtk2])
-@@ -2745,7 +2745,18 @@ AST_C_DEFINE_CHECK([SO_NOSIGPIPE], [SO_N
+@@ -2779,7 +2779,18 @@ AST_C_DEFINE_CHECK([SO_NOSIGPIPE], [SO_N
  
  AST_EXT_TOOL_CHECK([SDL], [sdl-config])
  AST_EXT_LIB_CHECK([SDL_IMAGE], [SDL_image], [IMG_Load], [SDL_image.h], [${SDL_LIB}], [${SDL_INCLUDE}])

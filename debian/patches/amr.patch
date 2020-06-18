@@ -531,7 +531,7 @@ Index: trunk/configure.ac
 ===================================================================
 --- trunk.orig/configure.ac
 +++ trunk/configure.ac
-@@ -468,6 +468,9 @@ THIRD_PARTY_CONFIGURE()
+@@ -466,6 +466,9 @@ THIRD_PARTY_CONFIGURE()
  # to make things easier for the users.
  
  AST_EXT_LIB_SETUP([ALSA], [Advanced Linux Sound Architecture], [asound])
@@ -541,7 +541,7 @@ Index: trunk/configure.ac
  AST_EXT_LIB_SETUP([BFD], [Debug symbol decoding], [bfd])
  
  # BKTR is used for backtrace support on platforms that do not
-@@ -1539,6 +1542,10 @@ fi
+@@ -1537,6 +1540,10 @@ fi
  
  AST_EXT_LIB_CHECK([ALSA], [asound], [snd_pcm_open], [alsa/asoundlib.h])
  
@@ -734,7 +734,7 @@ Index: trunk/makeopts.in
 ===================================================================
 --- trunk.orig/makeopts.in
 +++ trunk/makeopts.in
-@@ -131,6 +131,13 @@ AST_FORTIFY_SOURCE=@AST_FORTIFY_SOURCE@
+@@ -129,6 +129,13 @@ AST_FORTIFY_SOURCE=@AST_FORTIFY_SOURCE@
  ALSA_INCLUDE=@ALSA_INCLUDE@
  ALSA_LIB=@ALSA_LIB@
  
