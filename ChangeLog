@@ -1,12 +1,312 @@
-2020-04-30 14:04 +0000  Asterisk Development Team <asteriskteam@digium.com>
+2020-06-11 08:42 +0000  Asterisk Development Team <asteriskteam@digium.com>
 
-	* asterisk 13.33.0 Released.
+	* asterisk 13.34.0 Released.
 
-2020-04-28 19:17 +0000  Asterisk Development Team <asteriskteam@digium.com>
+2020-06-09 08:59 +0000  Asterisk Development Team <asteriskteam@digium.com>
 
-	* asterisk 13.33.0-rc2 Released.
+	* asterisk 13.34.0-rc3 Released.
 
-2020-04-26 05:56 +0000 [547c59f00f]  Guido Falsi <madpilot@FreeBSD.org>
+2020-06-04 01:50 +0000 [5337667d38]  Pirmin Walthert <infos@nappsoft.ch>
+
+	* res_pjsip_logger: use the correct pointer when logging tx_messages to pcap
+
+	  When writing tx messages to pcap files, Asterisk is using the wrong
+	  pointer resulting in lots of wasted space. This patch fixes it to use
+	  the correct pointer.
+
+	  ASTERISK-28932 #close
+
+	  Change-Id: I5b8253dd59a083a2ca2c81f232f1d14d33c6fd23
+
+2020-06-02 08:55 +0000  Asterisk Development Team <asteriskteam@digium.com>
+
+	* asterisk 13.34.0-rc2 Released.
+
+2020-05-29 04:28 +0000 [4075ae5957]  Pirmin Walthert <infos@nappsoft.ch>
+
+	* res_pjsip_logger.c: correct the return value checks when writing to pcap
+	  files
+
+	  fwrite() does return the number of elements written and not the
+	  number of bytes. However asterisk is currently comparing the return
+	  value to the size of the written element what means that asterisk logs
+	  five WARNING messages on every packet written to the pcap file.
+
+	  This patch changes the code to check for the correct value, which will
+	  always be 1.
+
+	  ASTERISK-28921 #close
+
+	  Change-Id: I2455032d9cb4c5a500692923f9e2a22e68b08fc2
+
+2020-05-28 12:10 +0000  Asterisk Development Team <asteriskteam@digium.com>
+
+	* asterisk 13.34.0-rc1 Released.
+
+2020-05-28 07:05 +0000 [07bf7890dc]  Asterisk Development Team <asteriskteam@digium.com>
+
+	* Update CHANGES and UPGRADE.txt for 13.34.0
+2020-05-27 09:35 +0000 [c8cabb08aa]  Joshua C. Colp <jcolp@sangoma.com>
+
+	* res_pjsip: Use correct pool for storing the contact_user value.
+
+	  When replacing the user portion of the Contact URI the code
+	  was using the ephemeral pool instead of the tdata pool. This
+	  could cause the Contact user value to become invalid after a
+	  period of time.
+
+	  The code will now use the tdata pool which persists for the
+	  lifetime of the message instead.
+
+	  ASTERISK-28794
+
+	  Change-Id: I31e7b958e397cbdaeedd0ebb70bcf8dd2ed3c4d5
+
+2020-05-13 07:06 +0000 [4b7293f44e]  Pirmin Walthert <infos@nappsoft.ch>
+
+	* res_pjsip_nat.c: remove x-ast-orig-host from request URI and To header
+
+	  While asterisk is filtering out the x-ast-orig-host parameter from the
+	  contact on response messages, it is not filtering it out from the
+	  request URI and the to header on SIP requests (for example INVITE).
+
+	  ASTERISK-28884 #close
+
+	  Change-Id: Id032b33098a1befea9b243ca994184baecccc59e
+
+2020-05-19 07:55 +0000 [0d86f49f7f]  Joshua C. Colp <jcolp@sangoma.com>
+
+	* res_sorcery_config: Always reload configuration on errors.
+
+	  When a configuration file in Asterisk is loaded
+	  information about it is stored such that on a
+	  reload it is not reloaded if nothing has changed.
+	  This can be problematic when an error exists in
+	  a configuration file in PJSIP since the error
+	  will be output at start and not subsequently on
+	  reload if the file is unchanged.
+
+	  This change makes it so that if an error is
+	  encountered when res_sorcery_config is loading
+	  a configuration file a reload will always read
+	  in the configuration file, allowing the error
+	  to be seen easier.
+
+	  Change-Id: If2e05a017570f1f5f4f49120da09601e9ecdf9ed
+
+2020-05-19 04:18 +0000 [17a878dd99]  Joshua C. Colp <jcolp@sangoma.com>
+
+	* bridge_softmix: Always remove audio from mixed frame.
+
+	  When receiving audio from a channel we determine if it
+	  is talking or silence based on a threshold value. If
+	  this threshold is met we always mix the audio into the
+	  conference bridge. If this threshold is not met we also
+	  mix the audio into the conference bridge UNLESS the
+	  drop silence option is enabled.
+
+	  The code that removed the audio from the mixed frame
+	  assumed that it was always not present if it did not
+	  meet the threshold to be considered talking. This is
+	  incorrect. If it has been stated that the audio was
+	  mixed into the mixed frame then it has been mixed into
+	  the mixed frame. By not removing audio that was
+	  considered non-talking it was possible for a channel
+	  to receive a slight echo of audio of itself at times.
+
+	  This change ensures that the audio is always removed
+	  from the mixed frame going back to the channel so it
+	  no longer receives the slight echo.
+
+	  ASTERISK-28898
+
+	  Change-Id: I7b1b582cc1bcdb318ecc60c9d2e3d87ae31d55cb
+
+2020-04-30 17:57 +0000 [4fba0f678b]  Joshua C. Colp <jcolp@sangoma.com>
+
+	* res_pjsip_logger: Expand functionality to improve logging.
+
+	  The PJSIP packet logger now has the following CLI commands:
+
+	  pjsip set logger pcap <filename>
+
+	  When used this will create a pcap file containing the incoming
+	  and outgoing SIP packets, in unencrypted form.
+
+	  pjsip set logger verbose <on / off>
+
+	  This allows you to toggle logging to verbose on and off.
+
+	  pjsip set logger host <IP/subnet mask> add
+
+	  This allows you to add an additional IP address or subnet
+	  mask to logging, allowing you to log multiple instead of
+	  just a single IP address or all traffic.
+
+	  The normal "pjsip set logger host" CLI command has also been
+	  expanded to allow subnet masks as well.
+
+	  ASTERISK-28895
+
+	  Change-Id: If5859161a72b0d7dd2d1f92d45bed88e0cd07d0e
+
+2020-05-18 11:31 +0000 [5de3f22ee0]  sungtae kim <sungtae@messagebird.com>
+
+	* res_rtp_asterisk.c: Fixed memory leak
+
+	  Added freeifaddrs() for memory releasing.
+
+	  ASTERISK-28904
+
+	  Change-Id: I109403866e85a30659351946903a679de9727a8f
+
+2020-05-08 06:11 +0000 [683f0b269e]  Guido Falsi <madpilot@FreeBSD.org>
+
+	* pjproject: Fix race condition when building with parallel make
+
+	  Pjproject makefiles miss some dependencies which can cause race
+	  conditions when building with parallel make processes. This patch
+	  adds such dependencies correctly.
+
+	  ASTERISK-28879 #close
+	  Reported-by: Dmitry Wagin <dmitry.wagin@ya.ru>
+
+	  Change-Id: Ie1b0dc365dafe4a84c5248097fe8d73804043c22
+
+2020-05-09 02:46 +0000 [3df1b65dd0]  Roger James <roger@beardandsandals.co.uk>
+
+	* res_pjsip_history.c: Fix to stop SIGSEGV when IPv6 addresses are encountered.
+
+	  Changed source and destination address fields in struct
+	  pjsip_history_entry so that they are long enough to hold an IPv6
+	  address.
+
+	  ASTERISK-28854
+
+	  Change-Id: Id65bb9aa961e9ecbcb500815e18170f774e34d3e
+
+2020-04-01 08:50 +0000 [377f5b6992]  Alexander Traud <pabstraud@compuserve.com>
+
+	* tcptls: Fix notice when TLS is enabled but not supported.
+
+	  ASTERISK-28797
+
+	  Change-Id: Iab364a2c2519fd9d11d1c28293fda43d61b64c28
+
+2020-04-04 04:28 +0000 [103b789e56]  Alexander Traud <pabstraud@compuserve.com>
+
+	* app_osplookup: Avoid a format truncation.
+
+	  Ensure that output buffers for the osp_convert_inout
+	  function have sufficient space for additional data
+	  such as brackets and ports.
+
+	  ASTERISK-28804
+
+	  Change-Id: Ie54c8241ff0cc653910539c2db00ff2a4869750b
+
+2020-04-14 11:02 +0000 [146e7c54f1]  Pirmin Walthert <infos@nappsoft.ch>
+
+	* app.c: make sure that no non-async-signal-safe syscalls are used after
+	  fork before exec
+
+	  Posix does only allow async-signal-safe syscalls after fork before exec.
+	  As asterisk ignores this, functions like TrySystem or System sometimes
+	  end up in a deadlocked child process. The patch prevents the use of
+	  non-async-signal-safe syscalls.
+
+	  ASTERISK-28776
+
+	  Change-Id: Idc76365c0592ee3f3b3bd72a4f48f7a098978e8e
+
+2020-04-08 18:41 +0000 [10292dc663]  Nathan Bruning <nathan@iperity.com>
+
+	* app_queue: track masquerades in app_queue to avoid leaked stasis subscriptions
+
+	  Add a new "masquarade" channel event, and use it in app_queue to track unique id's.
+
+	  Testcase is submitted as https://gerrit.asterisk.org/c/testsuite/+/14210
+
+	  ASTERISK-28829 #close
+	  ASTERISK-25844 #close
+
+	  Change-Id: Ifc5f9f9fd70903f3c6e49738d3bc632b085d2df6
+
+2020-05-03 05:30 +0000 [77837059ac]  Guido Falsi <madpilot@FreeBSD.org>
+
+	* pjproject: Remove bashism from configure.m4 script
+
+	  The configure.m4 script for pjproject contains some += syntax, which
+	  is specific to bash, replacing it with string substitutions makes
+	  the script compatible with traditional Bourne shells.
+
+	  ASTERISK-28866 #close
+	  Reported-by: Christoph Moench-Tegeder <cmt@FreeBSD.org>
+
+	  Change-Id: I382a78160e028044598b7da83ec7e1ff42b91c05
+
+2020-05-04 03:29 +0000 [f5a1a91b03]  Jaco Kroon <jaco@uls.co.za>
+
+	* Remove #include <sys/cdefs.h>
+
+	  These are not provided by standards, and as a result causes failure to
+	  compile on musl.
+
+	  https://wiki.musl-libc.org/faq.html#Q:-When-compiling-something-against-musl,-I-get-error-messages-about-%3Ccode%3Esys/cdefs.h%3C/code%3E
+
+	  Change-Id: I6a357cefd106c72cfecafd898638f6b5692c2e05
+
+2020-04-30 10:56 +0000 [2d1713395b]  George Joseph <gjoseph@digium.com>
+
+	* app_voicemail: Add workaround for a gcc 10 issue with -Wrestrict
+
+	  The gcc 10 -Wrestrict option was causing "overlap" errors when
+	  snprintf was copying one char[256] structure member to another
+	  char[256] member in the same structure.
+
+	  Using ast_alloca instead of declaring the structure inline
+	  solves the issue.
+
+	  Here's a link to the "enhancement":
+	  https://gcc.gnu.org/legacy-ml/gcc-patches/2019-10/msg00570.html
+
+	  We may follow up with a gcc bug report.
+
+	  Change-Id: Ie0099adcb0a9727bd9aa99e024dd912a67eaf534
+
+2020-04-27 10:28 +0000 [18cc090761]  Alexander Traud <pabstraud@compuserve.com>
+
+	* core_local: Local calls are always secure.
+
+	  In a Dialplan, the channel drivers 'chan_sip' and 'chan_iax2' support
+	  the channel items 'secure_bridge_media' and 'secure_bridge_signaling'.
+	  That way, a channel can be forced to use encryption even if not
+	  specified in its configuration.
+
+	  However, when the Local Proxy kicks in, for example, in case of a
+	  forwarding (SIP status 302), Local Proxy stated it does not know those
+	  items. Consequently, such a call could not be proxied how clever your
+	  Dialplan was. Because local calls within Asterisk are always secure,
+	  Local Proxy accepts such a request now.
+
+	  ASTERISK-22920
+
+	  Change-Id: I4c143bb70f686790953cc04c5a4b810bbb03636c
+
+2020-04-28 10:31 +0000 [35f7e24ebc]  Joshua C. Colp <jcolp@sangoma.com>
+
+	* pjsip: Increase maximum ICE candidate count.
+
+	  In practice it has been seen that some users come
+	  close to our maximum ICE candidate count of 32.
+	  In case people have gone over this increases the
+	  count to 64, giving ample room.
+
+	  ASTERISK-28859
+
+	  Change-Id: I35cd68948ec0ada86c14eb53092cdaf8b62996cf
+
+2020-04-26 05:56 +0000 [5c74f22977]  Guido Falsi <madpilot@FreeBSD.org>
 
 	* res_rtp_asterisk: Protect access to nochecksums with #ifdef
 
@@ -15,6 +315,19 @@
 	  ASTERISK-28852 #close
 
 	  Change-Id: I381718893b80599ab8635f2b594a10c1000d595e
+
+2020-04-17 02:39 +0000 [7714bbfeaa]  Peter Turczak <peter@turczak.de>
+
+	* chan_mobile: Add smoother to make SIP/RTP endpoints happy.
+
+	  In contrast to RFC 3551, section 4.2, several SIP/RTP clients misbehave
+	  severly (up to crashing). This patch adds another smoother for the audio
+	  received via bt. Therefore the audio frames sent to the core will be
+	  CHANNEL_FRAME_SIZE.
+
+	  ASTERISK-28832 #close
+
+	  Change-Id: Ic5f9e2f35868ae59cc9356afbd1388b779a1267f
 
 2020-04-23 16:10 +0000  Asterisk Development Team <asteriskteam@digium.com>
 
