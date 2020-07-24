@@ -1283,5 +1283,11 @@ ALTER TABLE ps_endpoints ADD COLUMN moh_passthrough yesno_values;
 
 UPDATE alembic_version SET version_num='339e1dfa644d' WHERE alembic_version.version_num = '3a094a18e75b';
 
+-- Running upgrade 339e1dfa644d -> 79290b511e4b
+
+ALTER TABLE ps_systems ADD COLUMN disable_rport ast_bool_values;
+
+UPDATE alembic_version SET version_num='79290b511e4b' WHERE alembic_version.version_num = '339e1dfa644d';
+
 COMMIT;
 
