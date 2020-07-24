@@ -1187,3 +1187,9 @@ ALTER TABLE ps_endpoints ADD COLUMN moh_passthrough ENUM('yes','no');
 
 UPDATE alembic_version SET version_num='339e1dfa644d' WHERE alembic_version.version_num = '3a094a18e75b';
 
+-- Running upgrade 339e1dfa644d -> 79290b511e4b
+
+ALTER TABLE ps_systems ADD COLUMN disable_rport ENUM('0','1','off','on','false','true','no','yes');
+
+UPDATE alembic_version SET version_num='79290b511e4b' WHERE alembic_version.version_num = '339e1dfa644d';
+

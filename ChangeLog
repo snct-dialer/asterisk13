@@ -1,12 +1,360 @@
-2020-06-11 08:42 +0000  Asterisk Development Team <asteriskteam@digium.com>
+2020-07-16 15:57 +0000  Asterisk Development Team <asteriskteam@digium.com>
 
-	* asterisk 13.34.0 Released.
+	* asterisk 13.35.0 Released.
 
-2020-06-09 08:59 +0000  Asterisk Development Team <asteriskteam@digium.com>
+2020-07-09 15:33 +0000  Asterisk Development Team <asteriskteam@digium.com>
 
-	* asterisk 13.34.0-rc3 Released.
+	* asterisk 13.35.0-rc1 Released.
 
-2020-06-04 01:50 +0000 [5337667d38]  Pirmin Walthert <infos@nappsoft.ch>
+2020-07-05 19:03 +0000 [c705e79d79]  George Joseph <gjoseph@digium.com>
+
+	* Scope Trace: Update stub defines
+
+	  Reminder:  13 doesn't support scope tracing but we're keeping
+	  the stub defines consistent across branches.
+
+	  Change-Id: If00733a4d5a4e829cbb4c934bcc2f4c1a80dab81
+
+2020-06-23 18:27 +0000 [52e1e362f0]  sungtae kim <pchero21@gmail.com>
+
+	* res_pjsip.c: Added disable_rport option for pjsip.conf
+
+	  Currently when the pjsip making an outgoing request, it keep adding the
+	  rport parameter in a request message as a default.
+
+	  This causes unexpected rport handle at the other end.
+
+	  Added option for disable this behaviour in the pjsip.conf.
+
+	  This is a system option, but working as a gloabl option.
+
+	  ASTERISK-28959
+
+	  Change-Id: I9596675e52a742774738b5aad5d1fec32f477abc
+
+2020-06-22 12:16 +0000 [f323ac334b]  Nickolay Shmyrev <nshmyrev@alphacephei.com>
+
+	* res_http_websocket.c: Continue reading after ping/pong
+
+	  Do not return error if the client received ping frame
+	  while looking for a string and just wait for another frame.
+
+	  ASTERISK-28958 #close
+
+	  Change-Id: I4d06b4827bd71e56cbaafc011ffdcef9f0332922
+
+2020-06-30 10:40 +0000 [ef19d69c6b]  Kevin Harwell <kharwell@digium.com>
+
+	* PJSIP_MEDIA_OFFER: override what's specified on configuration
+
+	  When using the PSJIP_MEDIA_OFFER dialplan function it was not
+	  overriding an endpoint's configured codecs unless they had a
+	  shared codec between the two.
+
+	  This patch makes it so whatever is set using PJSIP_MEDIA_OFFER
+	  is used when creating the SDP definition no matter what.
+
+	  ASTERISK-28878 #close
+
+	  Change-Id: I0f7dc86fd0fb607c308e6f98ede303c54d1eacb6
+
+2020-06-10 16:58 +0000 [4bbc5be798]  Kevin Harwell <kharwell@digium.com>
+
+	* manager - Add Content-Type parameter to the SendText action
+
+	  This patch allows a user of AMI to now specify the type of message
+	  content contained within by setting the 'Content-Type' parameter.
+
+	  Note, the AMI version has been bumped for this change.
+
+	  ASTERISK-28945 #close
+
+	  Change-Id: Ibb5315702532c6b954e1498beddc8855fabdf4bb
+
+2020-06-29 08:00 +0000 [9fce541643]  George Joseph <gjoseph@digium.com>
+
+	* logger: Fix scope trace defines
+
+	  Although not implemented in the 13 branch, we need to keep the
+	  defines consistent across all branches.
+
+	  Change-Id: Id88ad71ca36818a35f1f14a5acb450e240366301
+
+2020-06-26 05:18 +0000 [df509590a1]  Joshua C. Colp <jcolp@sangoma.com>
+
+	* res_pjsip: Apply AOR outbound proxy to static contacts.
+
+	  The outbound proxy for an AOR was not being applied to
+	  any statically configured Contacts. This resulted in the
+	  OPTIONS requests being sent to the wrong target.
+
+	  This change sets the outbound proxy on statically configured
+	  contacts once the AOR configuration is done being
+	  applied.
+
+	  ASTERISK-28965
+
+	  Change-Id: Ia60f3e93ea63f819c5a46bc8b54be2e588dfa9e0
+
+2020-06-24 05:25 +0000 [2513235859]  Joshua C. Colp <jcolp@sangoma.com>
+
+	* menuselect: Resolve infinite loop in dependency scenario.
+
+	  Given a scenario where a module has a dependency on both
+	  an external library and a module if the external library was
+	  available and the module was not an infinite loop would
+	  occur. This happened due to the code changing the dependecy
+	  status to no failure on each dependency checking loop
+	  iteration, resulting in the code thinking that it had
+	  gone from no failure to failure each time triggering another
+	  dependency check.
+
+	  This change makes it so that the old dependency status is
+	  preserved throughout the dependency checking allowing it to
+	  determine that after the first iteration the dependency
+	  status does not transition from no failure to failure.
+
+	  ASTERISK-28930
+
+	  Change-Id: Iea06d45d9fd6d8bfd068882a0bb7e23a53ec3e84
+
+2020-06-22 04:08 +0000 [745ae35f0e]  Frederic LE FOLL <frederic.lefoll@c-s.fr>
+
+	* chan_sip: chan_sip does not process 400 response to an INVITE.
+
+	  chan_sip handle_response() function, for a 400 response to an INVITE,
+	  calls handle_response_invite() and does not generate ACK.
+	  handle_response_invite() does not recognize 400 response and has no
+	  default response processing for unexpected responses, thus it does not
+	  generate ACK either.
+	  The ACK on response repetition comes from handle_response() mechanism
+	  "We must re-send ACKs to re-transmitted final responses".
+
+	  According to code history, 400 response specific processing was
+	  introduced with commit
+	  "channels/chan_sip: Add improved support for 4xx error codes"
+	  This commit added support for :
+	  - 400/414/493 in handle_response_subscribe() handle_response_register()
+	    and handle_response().
+	  - 414/493 only in handle_response_invite().
+
+	  This fix adds 400 response support in handle_response_invite().
+
+	  ASTERISK-28957
+
+	  Change-Id: Ic71a087e5398dfc7273946b9ec6f9a36960218ad
+
+2020-06-03 05:05 +0000 [09370b0a2b]  Università di Bologna - CESIA VoIP <cesia.voip@unibo.it>
+
+	* res_corosync: Fix crash in huge distributed environment.
+
+	  1) Fix memory-leaks
+	     Added code to release ast_events extracted from corosync and stasis messages
+
+	  2) Clean stasis cache when a member of the corosync cluster leaves the group
+	     Added code to remove from the stasis cache of the members remained on the
+	     group all the messages with the EID of the left member.
+	     If the device states of the left member remain in the stasis cache of other
+	     members, they will not be updated anymore and high priority cached values,
+	     like BUSY, will take precedence over current device states.
+
+	  3) Stop corosync event propagation when node is not joined to the group
+	     Updated dispatch_thread_handler code to detect when asterisk is not joined
+	     to the corosync group and added some condition in publish_event_to_corosync
+	     code to send corosync messages only when joined.
+	     When a node is not joined its corosync daemon can't send messages:
+	     the cpg_mcast_joined function append new messages to the FIFO buffer until
+	     it's full and then it blocks indefinitely.
+	     In this scenario if the stasis_message_cb callback, registered by
+	     res_corosync to handle stasis messages, try to send a corosync messages,
+	     the thread of the stasis thread-pool will be blocked until the node join
+	     the corosync cluster.
+
+	  ASTERISK-28888
+	  Reported by: Università di Bologna - CESIA VoIP
+
+	  Change-Id: Ie8e99bc23f141a73c13ae6fb1948d148d4de17f2
+
+2020-06-13 11:29 +0000 [635885ec33]  Moises Silva <moises.silva@gmail.com>
+
+	* res_http_websocket: Add payload masking to the websocket client
+
+	  ASTERISK-28949
+
+	  Change-Id: Id465030f2b1997b83d408933fdbabe01827469ca
+
+2020-06-18 05:14 +0000 [a3af7ef7e7]  Guido Falsi <madpilot@FreeBSD.org>
+
+	* chan_dadhi: Fix setvar in dahdi channels
+
+	  The change to how setvar works for various channels performed in
+	  ASTERISK~23756 missed some required change in the dahdi channel,
+	  where the variables are actually set while reading configuration.
+	  This change should fix the issue.
+
+	  ASTERISK-28955
+
+	  Change-Id: Ibfeb7f8cbdd735346dc4028de6a265f24f9df274
+
+2020-06-10 04:35 +0000 [1a40a6d55a]  Joshua C. Colp <jcolp@sangoma.com>
+
+	* res_sorcery_memory_cache: Disallow per-object expire with full backend.
+
+	  The AMI action and CLI command did not take into account the properties
+	  of full backend caching. This resulted in an expired object remaining
+	  removed until a full backend update occurred, instead of having the
+	  object updated when needed.
+
+	  This change makes it so that the AMI action and CLI command for object
+	  expire will now fail instead of putting the cache into an undesired
+	  state. If full backend caching is enabled then only operations
+	  which act on the entire cache are available.
+
+	  ASTERISK-28942
+
+	  Change-Id: Id662d888f177ab566c8e802ad583083b742d21f4
+
+2020-06-15 06:55 +0000 [8576603faf]  Walter Doekes <walter+asterisk@wjd.nu>
+
+	* app_queue: Read latest wrapuptime instead of (possibly stale) copy
+
+	  Before this changeset, it was possible that a queue member (agent) was
+	  called even though they just got out of a call, and wrapuptime seconds
+	  hadn't passed yet.
+
+	  This could happen if a member ended a call _between_ a new call attempt
+	  and asterisk trying that particular member for a new call.
+
+	  In that case, Asterisk would check the hangup time of the
+	  call-before-the-last-call instead of the hangup time of the-last-call.
+
+	  ASTERISK-28952
+
+	  Change-Id: Ie0cab8f0e8d639c01cba633d4968ba19873d80b3
+
+2020-06-15 06:53 +0000 [bcc7766bf6]  Walter Doekes <walter+asterisk@wjd.nu>
+
+	* app_queue: Remove stale code in try_calling
+
+	  Because ring_entry() is not called, outgoing->chan is not touched here
+	  either.
+
+	  ASTERISK-28950
+	  ASTERISK-28644
+
+	  Change-Id: I564613715dfaf45af868251eb75a451f512af90f
+
+2020-06-15 07:09 +0000 [50ba662b6a]  Walter Doekes <walter+asterisk@wjd.nu>
+
+	* res_pjsip: Include <pjsip_ua.h> instead of internal "pjsua-lib/pjsua.h"
+
+	  Change-Id: I24b5453df412232cf7f9a171ea4a34b35ad3ae78
+
+2020-05-15 16:08 +0000 [58eaf41e28]  Kevin Harwell <kharwell@digium.com>
+
+	* pjproject: Upgrade bundled version to pjproject 2.10
+
+	  This patch makes the usual necessary changes when upgrading to a new
+	  version pjproject. For instance, version number bump, patches removed
+	  from third-party, new *.md5 file added, etc..
+
+	  This patch also includes a change to the Asterisk pjproject Makefile to
+	  explicitly create the 'source/pjsip-apps/lib' directory. This directory
+	  is no longer there by default so needs to be added so the Asterisk
+	  malloc debug can be built.
+
+	  This patch also includes some minor changes to Asterisk that were a result
+	  of the upgrade. Specifically, there was a backward incompatibility change
+	  made in 2.10 that modified the "expires header" variable field from a
+	  signed to an unsigned value. This potentially effects comparison. Namely,
+	  those check for a value less than zero. This patch modified a few locations
+	  in the Asterisk code that may have been affected.
+
+	  Lastly, this patch adds a new macro PJSIP_MINVERSION that can be used to
+	  check a minimum version of pjproject at compile time.
+
+	  ASTERISK-28899 #close
+
+	  Change-Id: Iec8821c6cbbc08c369d0e3cd2f14e691b41d0c81
+
+2020-06-03 11:23 +0000 [dd983edafe]  George Joseph <gjoseph@digium.com>
+
+	* res_fax: Don't start a gateway if either channel is hung up
+
+	  When fax_gateway_framehook is called and a gateway hasn't already
+	  been started, the framehook gets the t38 state for both the current
+	  channel and the peer.  That call trickles down to the channel
+	  driver which determines the state.  If either channel is hung up
+	  (or in the process of being hung up), the channel driver's tech_pvt
+	  is going to be NULL which, in the case of chan_pjsip, will cause a
+	  segfault.
+
+	  * Added a hangup check for both the channel and peer channel
+	    before starting a fax gateway.
+
+	  * Added a check for NULL tech_pvt to chan_pjsip_queryoption
+	    so we don't attempt to reference a tech_pvt that's already
+	    gone.
+
+	  ASTERISK-28923
+	  Reported by: Yury Kirsanov
+
+	  Change-Id: I4e10e63b667bbb68c1c8623f977488f5d807897c
+
+2020-06-03 11:45 +0000 [654ec4b908]  Kevin Harwell <kharwell@digium.com>
+
+	* Compiler fixes for gcc 10
+
+	  This patch fixes a few compile warnings/errors that now occur when using gcc
+	  10+.
+
+	  Also, the Makefile.rules check to turn off partial inlining in gcc versions
+	  greater or equal to 8.2.1 had a bug where it only it only checked against
+	  versions with at least 3 numbers (ex: 8.2.1 vs 10). This patch now ensures
+	  any version above the specified version is correctly compared.
+
+	  Change-Id: I54718496eb0c3ce5bd6d427cd279a29e8d2825f9
+
+2020-06-05 04:30 +0000 [1e5ea08e0c]  Walter Doekes <walter+asterisk@wjd.nu>
+
+	* pjsip: Prevent invalid memory access when attempting to contact a non-sip URI
+
+	  You cannot cast a pjsip_uri to a pjsip_sip_uri using pjsip_uri_get_uri,
+	  without checking that it's a PJSIP_URI_SCHEME_IS_SIP(S).
+
+	  ASTERISK-28936
+
+	  Change-Id: I9f572b3677e4730458e9402719e580f8681afe2a
+
+2020-05-27 03:47 +0000 [f30a61022a]  Joshua C. Colp <jcolp@sangoma.com>
+
+	* res_fax: Don't consume frames given to fax gateway on write.
+
+	  In a particular fax gateway scenario whereby it would
+	  have to translate using the read translation path on a
+	  channel the frame being translated would be consumed.
+	  When the frame is in the write path it is not permitted
+	  to free the frame as the caller expects it to continue
+	  to exist.
+
+	  This change makes it so that the frame is only consumed
+	  on the read path where it is acceptable to free it.
+
+	  ASTERISK-28900
+
+	  Change-Id: I011c321288a1b056d92b37c85e229f4a28ee737d
+
+2020-06-02 06:24 +0000 [439f782452]  Alexander Traud <pabstraud@compuserve.com>
+
+	* pjproject_bundled: Honor --without-pjproject.
+
+	  The previous change missed that 'make' uses 'PJPROJECT_BUNDLED' anyway.
+
+	  ASTERISK-28929
+
+	  Change-Id: I7ef0e78a06ea391b59d95b99d46bbed3fec4fed9
+
+2020-06-04 01:50 +0000 [84da8622f6]  Pirmin Walthert <infos@nappsoft.ch>
 
 	* res_pjsip_logger: use the correct pointer when logging tx_messages to pcap
 
@@ -18,11 +366,35 @@
 
 	  Change-Id: I5b8253dd59a083a2ca2c81f232f1d14d33c6fd23
 
-2020-06-02 08:55 +0000  Asterisk Development Team <asteriskteam@digium.com>
+2020-05-21 08:20 +0000 [edf9471e05]  George Joseph <gjoseph@digium.com>
 
-	* asterisk 13.34.0-rc2 Released.
+	* Scope Tracing:  Add stubs to allow easier cherry-picking
 
-2020-05-29 04:28 +0000 [4075ae5957]  Pirmin Walthert <infos@nappsoft.ch>
+	  Scope tracing isn't supported in Asterisk 13 due to changes made
+	  to logging between 13 and 16 but since the scope tracing macros
+	  may be present in the 16, 17 and master branches, those macros
+	  are defined here as NOOPs so cherry-picking changes downward
+	  to 13 can still be seamless.
+
+	  Change-Id: I0390ce5651374d8f3e06d7620050acb22c5440a2
+
+2020-05-31 17:10 +0000 [e7f7c8c9de]  Joshua C. Colp <jcolp@sangoma.com>
+
+	* res_rtp_asterisk: Re-order RTP destruction.
+
+	  The destructor for RTP deallocated transport resources
+	  before terminating the ICE support. This could result
+	  in a crash as the thread handling ICE would access already
+	  freed parts of the RTP data.
+
+	  This change re-orders the destruction so that ICE is
+	  stopped before destroying things.
+
+	  ASTERISK-28885
+
+	  Change-Id: Ie71add549f12b6cdea7e9dbf976d1bd1d2fc0bdc
+
+2020-05-29 04:28 +0000 [81b86702fb]  Pirmin Walthert <infos@nappsoft.ch>
 
 	* res_pjsip_logger.c: correct the return value checks when writing to pcap
 	  files
