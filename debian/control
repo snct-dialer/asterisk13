@@ -72,6 +72,8 @@ Build-Depends:
  portaudio19-dev,
  unixodbc-dev,
  uuid-dev,
+ wget,
+ bash,
  zlib1g-dev
 Standards-Version: 3.9.8
 Homepage: http://www.asterisk.org/

@@ -27,6 +27,7 @@
 #include <pjsip.h>
 #include <pjsip_ua.h>
 #include <pjlib.h>
+#include <pjmedia.h>
 
 #include "asterisk/res_pjsip.h"
 #include "asterisk/res_pjsip_session.h"
@@ -1351,6 +1352,7 @@ static void session_destructor(void *obj)
 	ao2_cleanup(session->aor);
 	ao2_cleanup(session->contact);
 	ao2_cleanup(session->req_caps);
+	ao2_cleanup(session->joint_caps);
 	ao2_cleanup(session->direct_media_cap);
 
 	ast_dsp_free(session->dsp);
@@ -1431,6 +1433,10 @@ struct ast_sip_session *ast_sip_session_alloc(struct ast_sip_endpoint *endpoint,
 	}
 	session->req_caps = ast_format_cap_alloc(AST_FORMAT_CAP_FLAG_DEFAULT);
 	if (!session->req_caps) {
+		return NULL;
+	}
+	session->joint_caps = ast_format_cap_alloc(AST_FORMAT_CAP_FLAG_DEFAULT);
+	if (!session->joint_caps) {
 		return NULL;
 	}
 	session->datastores = ao2_container_alloc_hash(AO2_ALLOC_OPT_LOCK_MUTEX, 0,
@@ -2130,6 +2136,62 @@ struct new_invite {
 	pjsip_rx_data *rdata;
 };
 
+static int check_sdp_content_type_supported(pjsip_media_type *content_type)
+{
+	pjsip_media_type app_sdp;
+	pjsip_media_type_init2(&app_sdp, "application", "sdp");
+
+	if (!pjsip_media_type_cmp(content_type, &app_sdp, 0)) {
+		return 1;
+	}
+
+	return 0;
+}
+
+static int check_content_disposition_in_multipart(pjsip_multipart_part *part)
+{
+	pjsip_hdr *hdr = part->hdr.next;
+	static const pj_str_t str_handling_required = {"handling=required", 16};
+
+	while (hdr != &part->hdr) {
+		if (hdr->type == PJSIP_H_OTHER) {
+			pjsip_generic_string_hdr *generic_hdr = (pjsip_generic_string_hdr*)hdr;
+
+			if (!pj_stricmp2(&hdr->name, "Content-Disposition") &&
+				pj_stristr(&generic_hdr->hvalue, &str_handling_required) &&
+				!check_sdp_content_type_supported(&part->body->content_type)) {
+				return 1;
+			}
+		}
+		hdr = hdr->next;
+	}
+
+	return 0;
+}
+
+/**
+ * if there is required media we don't understand, return 1
+ */
+static int check_content_disposition(pjsip_rx_data *rdata)
+{
+	pjsip_msg_body *body = rdata->msg_info.msg->body;
+	pjsip_ctype_hdr *ctype_hdr = rdata->msg_info.ctype;
+
+	if (body && ctype_hdr &&
+		!pj_stricmp2(&ctype_hdr->media.type, "multipart") &&
+		(!pj_stricmp2(&ctype_hdr->media.subtype, "mixed") ||
+		 !pj_stricmp2(&ctype_hdr->media.subtype, "alternative"))) {
+		pjsip_multipart_part *part = pjsip_multipart_get_first_part(body);
+		while (part != NULL) {
+			if (check_content_disposition_in_multipart(part)) {
+				return 1;
+			}
+			part = pjsip_multipart_get_next_part(body, part);
+		}
+	}
+	return 0;
+}
+
 static int new_invite(struct new_invite *invite)
 {
 	pjsip_tx_data *tdata = NULL;
@@ -2192,6 +2254,15 @@ static int new_invite(struct new_invite *invite)
 		}
 		goto end;
 	};
+
+	if (check_content_disposition(invite->rdata)) {
+		if (pjsip_inv_initial_answer(invite->session->inv_session, invite->rdata, 415, NULL, NULL, &tdata) == PJ_SUCCESS) {
+			ast_sip_session_send_response(invite->session, tdata);
+		} else  {
+			pjsip_inv_terminate(invite->session->inv_session, 415, PJ_TRUE);
+		}
+		goto end;
+	}
 
 	pjsip_timer_setting_default(&timer);
 	timer.min_se = invite->session->endpoint->extensions.timer.min_se;
@@ -2825,6 +2896,28 @@ static void session_inv_on_tsx_state_changed(pjsip_inv_session *inv, pjsip_trans
 						}
 					}
 				} else if (tsx->state == PJSIP_TSX_STATE_TERMINATED) {
+					if (!inv->cancelling
+						&& inv->role == PJSIP_ROLE_UAC
+						&& inv->state == PJSIP_INV_STATE_CONFIRMED
+						&& pjmedia_sdp_neg_was_answer_remote(inv->neg)
+						&& pjmedia_sdp_neg_get_state(inv->neg) == PJMEDIA_SDP_NEG_STATE_DONE
+						&& (session->channel && ast_channel_hangupcause(session->channel) == AST_CAUSE_BEARERCAPABILITY_NOTAVAIL)
+						) {
+						/*
+						 * We didn't send a CANCEL but the UAS sent us the 200 OK with an invalid or unacceptable codec SDP.
+						 * In this case the SDP negotiation is incomplete and PJPROJECT has already sent the ACK.
+						 * So, we send the BYE with 503 status code here. And the actual hangup cause code is already set
+						 * to AST_CAUSE_BEARERCAPABILITY_NOTAVAIL by the session_inv_on_media_update(), setting the 503
+						 * status code doesn't affect to hangup cause code.
+						 */
+						ast_debug(1, "Endpoint '%s(%s)': Ending session due to 200 OK with incomplete SDP negotiation.  %s\n",
+							ast_sorcery_object_get_id(session->endpoint),
+							session->channel ? ast_channel_name(session->channel) : "",
+							pjsip_rx_data_get_info(e->body.tsx_state.src.rdata));
+						pjsip_inv_end_session(session->inv_session, 503, NULL, &tdata);
+						return;
+					}
+
 					if (inv->cancelling && tsx->status_code == PJSIP_SC_OK) {
 						int sdp_negotiation_done =
 							pjmedia_sdp_neg_get_state(inv->neg) == PJMEDIA_SDP_NEG_STATE_DONE;
@@ -2843,11 +2936,6 @@ static void session_inv_on_tsx_state_changed(pjsip_inv_session *inv, pjsip_trans
 						 * UAS sent us an invalid SDP with the 200 OK.  In this case
 						 * the SDP negotiation is incomplete and PJPROJECT has
 						 * already sent the BYE for us because of the invalid SDP.
-						 *
-						 * 3) We didn't send a CANCEL but the UAS sent us an invalid
-						 * SDP with the 200 OK.  In this case the SDP negotiation is
-						 * incomplete and PJPROJECT has already sent the BYE for us
-						 * because of the invalid SDP.
 						 */
 						ast_test_suite_event_notify("PJSIP_SESSION_CANCELED",
 							"Endpoint: %s\r\n"
@@ -3246,8 +3334,8 @@ static void session_outgoing_nat_hook(pjsip_tx_data *tdata, struct ast_sip_trans
 		 * outgoing session IP is local. If it is, we'll do
 		 * rewriting. No localnet configured? Always rewrite. */
 		if (ast_sip_transport_is_local(transport_state, &our_sdp_addr) || !transport_state->localnet) {
-			ast_debug(5, "Setting external media address to %s\n", ast_sockaddr_stringify_host(&transport_state->external_media_address));
-			pj_strdup2(tdata->pool, &sdp->conn->addr, ast_sockaddr_stringify_host(&transport_state->external_media_address));
+			ast_debug(5, "Setting external media address to %s\n", ast_sockaddr_stringify_addr_remote(&transport_state->external_media_address));
+			pj_strdup2(tdata->pool, &sdp->conn->addr, ast_sockaddr_stringify_addr_remote(&transport_state->external_media_address));
 			pj_strassign(&sdp->origin.addr, &sdp->conn->addr);
 		}
 	}

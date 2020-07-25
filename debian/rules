@@ -80,9 +80,9 @@ override_dh_auto_configure:
 #	cp -a debian/pjproject_2.8~dfsg.orig.tar.bz2 /tmp/pjproject-2.8.tar.bz2
 #	cp third-party/pjproject/pjproject-2.8.tar.bz2.md5 third-party/pjproject/pjproject-2.8.tar.bz2.md5.debian_sav
 #	md5sum /tmp/pjproject-2.8.tar.bz2 | sed 's:/tmp/::' > third-party/pjproject/pjproject-2.8.tar.bz2.md5
-	cp -a debian/pjproject-2.9.tar.bz2 /tmp/pjproject-2.9.tar.bz2
-	cp third-party/pjproject/pjproject-2.9.tar.bz2.md5 third-party/pjproject/pjproject-2.9.tar.bz2.md5.debian_sav
-	md5sum /tmp/pjproject-2.9.tar.bz2 | sed 's:/tmp/::' > third-party/pjproject/pjproject-2.9.tar.bz2.md5
+	cp -a debian/pjproject-2.10.tar.bz2 /tmp/pjproject-2.10.tar.bz2
+	cp third-party/pjproject/pjproject-2.10.tar.bz2.md5 third-party/pjproject/pjproject-2.10.tar.bz2.md5.debian_sav
+	md5sum /tmp/pjproject-2.10.tar.bz2 | sed 's:/tmp/::' > third-party/pjproject/pjproject-2.10.tar.bz2.md5
 	$(FETCH_ENV) ./configure			\
 		CFLAGS="-fgnu89-inline $(CFLAGS) $(CPPFLAGS)" LDFLAGS="$(LDFLAGS) -Wl,--as-needed" \
 		--host=$(DEB_HOST_GNU_TYPE)		\
@@ -95,16 +95,16 @@ override_dh_auto_configure:
 		--with-imap=system			\
 		--without-pwlib				\
 		--with-pjproject-bundled		\
+		--with-codec_g729a			\
 		$(if $(EXP_RELEASE),,--without-sdl) \
 		${ENABLE_DEBUG} || { cat config.log; exit 1; }
-
 #		--with-pjproject-bundled		\
 #		NOISY_BUILD=yes				\
 #		--with-cap \
 
 override_dh_auto_build:
 	$(MAKE) menuselect.makeopts BUILD_CFLAGS="$(CFLAGS) $(CPPFLAGS)" BUILD_LDFLAGS="$(LDFLAGS)"
-	menuselect/menuselect --enable codec_opus_open_source menuselect.makeopts
+	menuselect/menuselect --enable codec_opus_open_source menuselect.makeopts ;
 	@if [ "x${ENABLE_DEBUG}" != "x" ] ; then \
 		menuselect/menuselect --enable BETTER_BACKTRACES menuselect.makeopts ; \
 		menuselect/menuselect --enable DEBUG_THREADS menuselect.makeopts ; \
@@ -153,6 +153,7 @@ override_dh_auto_install:
 	cp -a debian/asterisk-config-custom $(CURDIR)/debian/tmp/usr/bin/
 	cp -a debian/asterisk-config-custom $(CURDIR)/debian/tmp/usr/share/man/man1/
 	cp -a debian/50-asterisk $(CURDIR)/debian/tmp/usr/share/dahdi/span_config.d/
+	cp -r contrib/scripts/* $(CURDIR)/debian/asterisk/usr/lib/asterisk/scripts
 	$(RM) -f $(CURDIR)/debian/tmp/usr/sbin/conf2ael
 	$(RM) -f $(CURDIR)/debian/tmp/usr/sbin/muted
 	$(RM) -f $(CURDIR)/debian/tmp/usr/sbin/streamplayer

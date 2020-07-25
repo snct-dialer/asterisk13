@@ -8,6 +8,8 @@ var/lib/asterisk
 usr/share/asterisk/static-http
 usr/share/asterisk/agi-bin
 
+usr/lib/asterisk/scripts
+
 var/lib/asterisk/moh
 var/lib/asterisk/sounds/custom
 var/lib/asterisk/priv-callerintros

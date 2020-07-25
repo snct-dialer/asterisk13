@@ -328,9 +328,16 @@ enum ast_control_frame_type {
 	AST_CONTROL_RECORD_MUTE = 1103,	/*!< Indicated to a channel in record to mute/unmute (i.e. write silence) recording */
 };
 
+/*!
+ * \brief Actions to indicate to, and be handled on channel read
+ *
+ * The subtype to specify for an AST_CONTROL_READ_ACTION frame. These
+ * frames are then to be enacted on within a channel's read thread.
+ */
 enum ast_frame_read_action {
 	AST_FRAME_READ_ACTION_CONNECTED_LINE_MACRO,
 	AST_FRAME_READ_ACTION_SEND_TEXT,
+	AST_FRAME_READ_ACTION_SEND_TEXT_DATA,
 };
 
 struct ast_control_read_action_payload {
@@ -586,6 +593,14 @@ struct ast_frame *ast_frame_enqueue(struct ast_frame *head, struct ast_frame *f,
   \return 0 for success, non-zero for an error
  */
 int ast_frame_adjust_volume(struct ast_frame *f, int adjustment);
+
+/*!
+  \brief Adjusts the volume of the audio samples contained in a frame.
+  \param f The frame containing the samples (must be AST_FRAME_VOICE and AST_FORMAT_SLINEAR)
+  \param adjustment The number of dB to adjust up or down.
+  \return 0 for success, non-zero for an error
+ */
+int ast_frame_adjust_volume_float(struct ast_frame *f, float adjustment);
 
 /*!
   \brief Sums two frames of audio samples.

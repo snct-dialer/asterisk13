@@ -629,7 +629,9 @@ struct ast_msg_var_iterator *ast_msg_var_iterator_init(const struct ast_msg *msg
 	return iter;
 }
 
-int ast_msg_var_iterator_next(const struct ast_msg *msg, struct ast_msg_var_iterator *iter, const char **name, const char **value)
+static int ast_msg_var_iterator_get_next(const struct ast_msg *msg,
+	struct ast_msg_var_iterator *iter, const char **name, const char **value,
+	unsigned int send)
 {
 	struct msg_data *data;
 
@@ -637,8 +639,8 @@ int ast_msg_var_iterator_next(const struct ast_msg *msg, struct ast_msg_var_iter
 		return 0;
 	}
 
-	/* Skip any that aren't marked for sending out */
-	while ((data = ao2_iterator_next(&iter->iter)) && !data->send) {
+	/* Skip any that we're told to */
+	while ((data = ao2_iterator_next(&iter->iter)) && (data->send != send)) {
 		ao2_ref(data, -1);
 	}
 
@@ -646,7 +648,7 @@ int ast_msg_var_iterator_next(const struct ast_msg *msg, struct ast_msg_var_iter
 		return 0;
 	}
 
-	if (data->send) {
+	if (data->send == send) {
 		*name = data->name;
 		*value = data->value;
 	}
@@ -656,6 +658,17 @@ int ast_msg_var_iterator_next(const struct ast_msg *msg, struct ast_msg_var_iter
 	iter->current_used = data;
 
 	return 1;
+}
+
+int ast_msg_var_iterator_next(const struct ast_msg *msg, struct ast_msg_var_iterator *iter, const char **name, const char **value)
+{
+	return ast_msg_var_iterator_get_next(msg, iter, name, value, 1);
+}
+
+int ast_msg_var_iterator_next_received(const struct ast_msg *msg,
+	  struct ast_msg_var_iterator *iter, const char **name, const char **value)
+{
+	return ast_msg_var_iterator_get_next(msg, iter, name, value, 0);
 }
 
 void ast_msg_var_unref_current(struct ast_msg_var_iterator *iter)
@@ -1406,12 +1419,38 @@ struct ast_msg_data *ast_msg_data_alloc(enum ast_msg_data_source_type source,
 	/* Set the ones we have and increment the offset */
 	for (i=0; i < count; i++) {
 		len = (strlen(attributes[i].value) + 1);
-		strcpy(msg->buf + current_offset, attributes[i].value); /* Safe */
+		ast_copy_string(msg->buf + current_offset, attributes[i].value, len); /* Safe */
 		msg->attribute_value_offsets[attributes[i].type] = current_offset;
 		current_offset += len;
 	}
 
 	return msg;
+}
+
+struct ast_msg_data *ast_msg_data_alloc2(enum ast_msg_data_source_type source_type,
+	const char *to, const char *from, const char *content_type, const char *body)
+{
+	struct ast_msg_data_attribute attrs[] =
+	{
+		{
+			.type = AST_MSG_DATA_ATTR_TO,
+			.value = (char *)S_OR(to, ""),
+		},
+		{
+			.type = AST_MSG_DATA_ATTR_FROM,
+			.value = (char *)S_OR(from, ""),
+		},
+		{
+			.type = AST_MSG_DATA_ATTR_CONTENT_TYPE,
+			.value = (char *)S_OR(content_type, ""),
+		},
+		{
+			.type = AST_MSG_DATA_ATTR_BODY,
+			.value = (char *)S_OR(body, ""),
+		},
+	};
+
+	return ast_msg_data_alloc(source_type, attrs, ARRAY_LEN(attrs));
 }
 
 struct ast_msg_data *ast_msg_data_dup(struct ast_msg_data *msg)

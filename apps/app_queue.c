@@ -1443,8 +1443,6 @@ struct callattempt {
 	struct ast_channel *chan;
 	char interface[256];			/*!< An Asterisk dial string (not a channel name) */
 	int metric;
-	time_t lastcall;
-	struct call_queue *lastqueue;
 	struct member *member;
 	/*! Saved connected party info from an AST_CONTROL_CONNECTED_LINE. */
 	struct ast_party_connected_line connected;
@@ -1485,7 +1483,7 @@ struct queue_ent {
 	int linwrapped;                        /*!< Is the linpos wrapped? */
 	time_t start;                          /*!< When we started holding */
 	time_t expire;                         /*!< When this entry should expire (time out of queue) */
-	int cancel_answered_elsewhere;	       /*!< Whether we should force the CAE flag on this call (C) option*/
+	int cancel_answered_elsewhere;         /*!< Whether we should force the CAE flag on this call (C) option */
 	struct ast_channel *chan;              /*!< Our channel */
 	AST_LIST_HEAD_NOLOCK(,penalty_rule) qe_rules; /*!< Local copy of the queue's penalty rules */
 	struct penalty_rule *pr;               /*!< Pointer to the next penalty rule to implement */
@@ -1510,7 +1508,7 @@ struct member {
 	int callcompletedinsl;               /*!< Whether the current call was completed within service level */
 	time_t starttime;                    /*!< The time at which the member answered the current caller. */
 	time_t lastcall;                     /*!< When last successful call was hungup */
-	struct call_queue *lastqueue;	     /*!< Last queue we received a call */
+	struct call_queue *lastqueue;        /*!< Last queue we received a call */
 	unsigned int dead:1;                 /*!< Used to detect members deleted in realtime */
 	unsigned int delme:1;                /*!< Flag to delete entry on reload */
 	char rt_uniqueid[80];                /*!< Unique id of realtime member entry */
@@ -3867,44 +3865,26 @@ static int say_position(struct queue_ent *qe, int ringing)
 		/* Say we're next, if we are */
 		if (qe->pos == 1) {
 			res = play_file(qe->chan, qe->parent->sound_next);
-			if (res) {
-				goto playout;
+			if (!res) {
+				goto posout;
 			}
-			goto posout;
+		/* Say there are more than N callers */
+		} else if (qe->parent->announceposition == ANNOUNCEPOSITION_MORE_THAN && qe->pos > qe->parent->announcepositionlimit) {
+			res = (
+				play_file(qe->chan, qe->parent->queue_quantity1) ||
+				ast_say_number(qe->chan, qe->parent->announcepositionlimit, AST_DIGIT_ANY,
+						ast_channel_language(qe->chan), NULL) || /* Needs gender */
+				play_file(qe->chan, qe->parent->queue_quantity2));
+		/* Say there are currently N callers waiting */
 		} else {
-			if (qe->parent->announceposition == ANNOUNCEPOSITION_MORE_THAN && qe->pos > qe->parent->announcepositionlimit){
-				/* More than Case*/
-				res = play_file(qe->chan, qe->parent->queue_quantity1);
-				if (res) {
-					goto playout;
-				}
-				res = ast_say_number(qe->chan, qe->parent->announcepositionlimit, AST_DIGIT_ANY, ast_channel_language(qe->chan), NULL); /* Needs gender */
-				if (res) {
-					goto playout;
-				}
-			} else {
-				/* Normal Case */
-				res = play_file(qe->chan, qe->parent->sound_thereare);
-				if (res) {
-					goto playout;
-				}
-				res = ast_say_number(qe->chan, qe->pos, AST_DIGIT_ANY, ast_channel_language(qe->chan), NULL); /* Needs gender */
-				if (res) {
-					goto playout;
-				}
-			}
-			if (qe->parent->announceposition == ANNOUNCEPOSITION_MORE_THAN && qe->pos > qe->parent->announcepositionlimit){
-				/* More than Case*/
-				res = play_file(qe->chan, qe->parent->queue_quantity2);
-				if (res) {
-					goto playout;
-				}
-			} else {
-				res = play_file(qe->chan, qe->parent->sound_calls);
-				if (res) {
-					goto playout;
-				}
-			}
+			res = (
+				play_file(qe->chan, qe->parent->sound_thereare) ||
+				ast_say_number(qe->chan, qe->pos, AST_DIGIT_ANY,
+						ast_channel_language(qe->chan), NULL) || /* Needs gender */
+				play_file(qe->chan, qe->parent->sound_calls));
+		}
+		if (res) {
+			goto playout;
 		}
 	}
 	/* Round hold time to nearest minute */
@@ -4254,36 +4234,38 @@ static int member_status_available(int status)
  */
 static int can_ring_entry(struct queue_ent *qe, struct callattempt *call)
 {
-	if (call->member->paused) {
+	struct member *memberp = call->member;
+
+	if (memberp->paused) {
 		ast_debug(1, "%s paused, can't receive call\n", call->interface);
 		return 0;
 	}
 
-	if (!call->member->ringinuse && !member_status_available(call->member->status)) {
+	if (!memberp->ringinuse && !member_status_available(memberp->status)) {
 		ast_debug(1, "%s not available, can't receive call\n", call->interface);
 		return 0;
 	}
 
-	if ((call->lastqueue && call->lastqueue->wrapuptime && (time(NULL) - call->lastcall < call->lastqueue->wrapuptime))
-		|| (!call->lastqueue && qe->parent->wrapuptime && (time(NULL) - call->lastcall < qe->parent->wrapuptime))) {
+	if ((memberp->lastqueue && memberp->lastqueue->wrapuptime && (time(NULL) - memberp->lastcall < memberp->lastqueue->wrapuptime))
+		|| (!memberp->lastqueue && qe->parent->wrapuptime && (time(NULL) - memberp->lastcall < qe->parent->wrapuptime))) {
 		ast_debug(1, "Wrapuptime not yet expired on queue %s for %s\n",
-			(call->lastqueue ? call->lastqueue->name : qe->parent->name),
+			(memberp->lastqueue ? memberp->lastqueue->name : qe->parent->name),
 			call->interface);
 		return 0;
 	}
 
-	if (use_weight && compare_weight(qe->parent, call->member)) {
+	if (use_weight && compare_weight(qe->parent, memberp)) {
 		ast_debug(1, "Priority queue delaying call to %s:%s\n",
 			qe->parent->name, call->interface);
 		return 0;
 	}
 
-	if (!call->member->ringinuse) {
+	if (!memberp->ringinuse) {
 		struct member *mem;
 
 		ao2_lock(pending_members);
 
-		mem = ao2_find(pending_members, call->member,
+		mem = ao2_find(pending_members, memberp,
 				  OBJ_SEARCH_OBJECT | OBJ_NOLOCK);
 		if (mem) {
 			/*
@@ -4301,8 +4283,8 @@ static int can_ring_entry(struct queue_ent *qe, struct callattempt *call)
 		 * If not found add it to the container so another queue
 		 * won't attempt to call this member at the same time.
 		 */
-		ast_debug(3, "Add %s to pending_members\n", call->member->membername);
-		ao2_link(pending_members, call->member);
+		ast_debug(3, "Add %s to pending_members\n", memberp->membername);
+		ao2_link(pending_members, memberp);
 		ao2_unlock(pending_members);
 
 		/*
@@ -4310,10 +4292,10 @@ static int can_ring_entry(struct queue_ent *qe, struct callattempt *call)
 		 * because the device state and extension state callbacks may
 		 * not have updated the status yet.
 		 */
-		if (!member_status_available(get_queue_member_status(call->member))) {
+		if (!member_status_available(get_queue_member_status(memberp))) {
 			ast_debug(1, "%s actually not available, can't receive call\n",
 				call->interface);
-			pending_members_remove(call->member);
+			pending_members_remove(memberp);
 			return 0;
 		}
 	}
@@ -6251,6 +6233,33 @@ static void handle_hangup(void *userdata, struct stasis_subscription *sub,
 	remove_stasis_subscriptions(queue_data);
 }
 
+static void handle_masquerade(void *userdata, struct stasis_subscription *sub,
+		struct stasis_message *msg)
+{
+	struct queue_stasis_data *queue_data = userdata;
+	struct ast_channel_blob *channel_blob = stasis_message_data(msg);
+	const char *new_channel_id;
+
+	new_channel_id = ast_json_string_get(ast_json_object_get(channel_blob->blob, "newchanneluniqueid"));
+
+	ao2_lock(queue_data);
+
+	if (queue_data->dying) {
+		ao2_unlock(queue_data);
+		return;
+	}
+
+	if (!strcmp(channel_blob->snapshot->uniqueid, queue_data->caller_uniqueid)) {
+		ast_debug(1, "Replacing caller channel %s with %s due to masquerade\n", queue_data->caller_uniqueid, new_channel_id);
+		ast_string_field_set(queue_data, caller_uniqueid, new_channel_id);
+	} else if (!strcmp(channel_blob->snapshot->uniqueid, queue_data->member_uniqueid)) {
+		ast_debug(1, "Replacing member channel %s with %s due to masquerade\n", queue_data->member_uniqueid, new_channel_id);
+		ast_string_field_set(queue_data, member_uniqueid, new_channel_id);
+	}
+
+	ao2_unlock(queue_data);
+}
+
 /*!
  * \internal
  * \brief Callback for all stasis channel events
@@ -6324,6 +6333,8 @@ static int setup_stasis_subs(struct queue_ent *qe, struct ast_channel *peer, str
 			handle_local_optimization_end, queue_data);
 	stasis_message_router_add(queue_data->channel_router, ast_channel_hangup_request_type(),
 			handle_hangup, queue_data);
+	stasis_message_router_add(queue_data->channel_router, ast_channel_masquerade_type(),
+			handle_masquerade, queue_data);
 	stasis_message_router_set_default(queue_data->channel_router,
 			queue_channel_cb, queue_data);
 
@@ -6627,9 +6638,7 @@ static int try_calling(struct queue_ent *qe, struct ast_flags opts, char **opt_a
 
 		tmp->block_connected_update = block_connected_line;
 		tmp->stillgoing = 1;
-		tmp->member = cur;/* Place the reference for cur into callattempt. */
-		tmp->lastcall = cur->lastcall;
-		tmp->lastqueue = cur->lastqueue;
+		tmp->member = cur; /* Place the reference for cur into callattempt. */
 		ast_copy_string(tmp->interface, cur->interface, sizeof(tmp->interface));
 		/* Calculate the metric for the appropriate strategy. */
 		if (!calc_metric(qe->parent, cur, x++, qe, tmp)) {
@@ -6638,9 +6647,6 @@ static int try_calling(struct queue_ent *qe, struct ast_flags opts, char **opt_a
 			   hung up XXX */
 			tmp->q_next = outgoing;
 			outgoing = tmp;
-			/* If this line is up, don't try anybody else */
-			if (outgoing->chan && (ast_channel_state(outgoing->chan) == AST_STATE_UP))
-				break;
 		} else {
 			callattempt_free(tmp);
 		}

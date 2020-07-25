@@ -141,7 +141,7 @@ Index: trunk/Makefile
 ===================================================================
 --- trunk.orig/Makefile
 +++ trunk/Makefile
-@@ -916,6 +916,8 @@ install-logrotate:
+@@ -920,6 +920,8 @@ install-logrotate:
  	rm -f contrib/scripts/asterisk.logrotate.tmp
  
  config:

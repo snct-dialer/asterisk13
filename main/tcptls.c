@@ -134,6 +134,28 @@ static const char *ssl_error_to_string(int sslerr, int ret)
 
 	return "Unknown";
 }
+
+static void write_openssl_error_to_log(void)
+{
+	FILE *fp;
+	char *buffer;
+	size_t length;
+
+	fp = open_memstream(&buffer, &length);
+	if (!fp) {
+		return;
+	}
+
+	ERR_print_errors_fp(fp);
+	fclose(fp);
+
+	if (length) {
+		ast_log(LOG_ERROR, "%.*s\n", (int) length, buffer);
+	}
+
+	ast_free(buffer);
+}
+
 #endif
 
 void ast_tcptls_stream_set_timeout_disable(struct ast_tcptls_stream *stream)
@@ -824,7 +846,7 @@ static void *handle_tcptls_connection(void *data)
 			ast_sockaddr_stringify(&tcptls_session->remote_address));
 #ifndef DO_SSL
 		if (tcptls_session->parent->tls_cfg) {
-			ast_log(LOG_ERROR, "Attempted a TLS connection without OpenSSL support. This will not work!\n");
+			ast_log(LOG_ERROR, "TLS client failed: Asterisk is compiled without OpenSSL support. Install OpenSSL development headers and rebuild Asterisk after running ./configure\n");
 		}
 #endif
 		ao2_ref(tcptls_session, -1);
@@ -917,7 +939,7 @@ static int __ssl_setup(struct ast_tls_config *cfg, int client)
 {
 #ifndef DO_SSL
 	if (cfg->enabled) {
-		ast_log(LOG_NOTICE, "Configured without OpenSSL Development Headers");
+		ast_log(LOG_ERROR, "TLS server failed: Asterisk is compiled without OpenSSL support. Install OpenSSL development headers and rebuild Asterisk after running ./configure\n");
 		cfg->enabled = 0;
 	}
 	return 0;
@@ -1010,6 +1032,7 @@ static int __ssl_setup(struct ast_tls_config *cfg, int client)
 			if (!client) {
 				/* Clients don't need a certificate, but if its setup we can use it */
 				ast_log(LOG_ERROR, "TLS/SSL error loading cert file. <%s>\n", cfg->certfile);
+				write_openssl_error_to_log();
 				cfg->enabled = 0;
 				SSL_CTX_free(cfg->ssl_ctx);
 				cfg->ssl_ctx = NULL;
@@ -1020,6 +1043,7 @@ static int __ssl_setup(struct ast_tls_config *cfg, int client)
 			if (!client) {
 				/* Clients don't need a private key, but if its setup we can use it */
 				ast_log(LOG_ERROR, "TLS/SSL error loading private key file. <%s>\n", tmpprivate);
+				write_openssl_error_to_log();
 				cfg->enabled = 0;
 				SSL_CTX_free(cfg->ssl_ctx);
 				cfg->ssl_ctx = NULL;
@@ -1031,6 +1055,7 @@ static int __ssl_setup(struct ast_tls_config *cfg, int client)
 		if (SSL_CTX_set_cipher_list(cfg->ssl_ctx, cfg->cipher) == 0 ) {
 			if (!client) {
 				ast_log(LOG_ERROR, "TLS/SSL cipher error <%s>\n", cfg->cipher);
+				write_openssl_error_to_log();
 				cfg->enabled = 0;
 				SSL_CTX_free(cfg->ssl_ctx);
 				cfg->ssl_ctx = NULL;
@@ -1041,6 +1066,7 @@ static int __ssl_setup(struct ast_tls_config *cfg, int client)
 	if (!ast_strlen_zero(cfg->cafile) || !ast_strlen_zero(cfg->capath)) {
 		if (SSL_CTX_load_verify_locations(cfg->ssl_ctx, S_OR(cfg->cafile, NULL), S_OR(cfg->capath,NULL)) == 0) {
 			ast_log(LOG_ERROR, "TLS/SSL CA file(%s)/path(%s) error\n", cfg->cafile, cfg->capath);
+			write_openssl_error_to_log();
 		}
 	}
 

@@ -1,3 +1,59 @@
+asterisk (2:13.35.0~se-1.buster) buster; urgency=medium
+
+  * New upstream release.
+    - refresh pjproject to release 2.10.
+    - Install scripts into /var/lib/asterisk/scripts.
+
+ -- Jörg Frings-Fürst <debian@jff.email>  Fri, 24 Jul 2020 22:17:04 +0200
+
+asterisk (2:13.35.0~se-1.stretch) stretch; urgency=medium
+
+  * New upstream release.
+    - refresh pjproject to release 2.10.
+    - Install scripts into /var/lib/asterisk/scripts.
+
+ -- Jörg Frings-Fürst <debian@jff.email>  Fri, 24 Jul 2020 22:17:04 +0200
+
+asterisk (2:13.34.0~se-1.stretch) stretch; urgency=medium
+
+  * New upstream release.
+
+ -- Jörg Frings-Fürst <debian@jff.email>  Sat, 20 Jun 2020 10:21:21 +0200
+
+asterisk (2:13.34.0~se-1.buster) buster; urgency=medium
+
+  * New upstream release.
+
+ -- Jörg Frings-Fürst <debian@jff.email>  Sat, 20 Jun 2020 09:43:13 +0200
+
+asterisk (2:13.33.0~se-1.stretch) stretch; urgency=medium
+
+  * New ustream release.
+    - Refresh patches.
+  * Add more Debug messages at translate.
+
+ -- Jörg Frings-Fürst <debian@jff.email>  Fri, 01 May 2020 17:26:00 +0200
+
+asterisk (2:13.33.0~se-1.buster) buster; urgency=medium
+
+  * New ustream release.
+    - Refresh patches.
+  * Add more Debug messages at translate.
+
+ -- Jörg Frings-Fürst <debian@jff.email>  Fri, 01 May 2020 17:11:54 +0200
+
+asterisk (2:13.32.0~se-1.buster) buster; urgency=medium
+
+  * New upstream release.
+
+ -- Jörg Frings-Fürst <debian@jff.email>  Sun, 12 Apr 2020 14:05:41 +0200
+
+asterisk (2:13.32.0~se-1.stretch) stretch; urgency=medium
+
+  * New upstream release.
+
+ -- Jörg Frings-Fürst <debian@jff.email>  Sun, 12 Apr 2020 14:05:41 +0200
+
 asterisk (2:13.31.0~se-1.buster) buster; urgency=medium
 
   * Release buster.

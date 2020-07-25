@@ -162,6 +162,7 @@ pjproject.symbols: $(ALL_LIB_FILES)
 source/pjsip-apps/src/asterisk_malloc_debug.c: patches/asterisk_malloc_debug.c
 	$(ECHO_PREFIX) Copying $< to $@
 	$(CMD_PREFIX) cp -f $< $@
+	$(CMD_PREFIX) mkdir source/pjsip-apps/lib/
 
 source/pjsip-apps/lib/asterisk_malloc_debug.o: source/pjsip-apps/src/asterisk_malloc_debug.c .rebuild_needed
 	$(ECHO_PREFIX) Compiling asterisk debug malloc stubs
@@ -184,7 +185,7 @@ source/pjsip-apps/src/python/_pjsua.o: source/pjsip-apps/src/python/_pjsua.c $(a
 source/pjsip-apps/src/python/_pjsua.so: LDFLAGS += $(MALLOC_DEBUG_LDFLAGS)
 source/pjsip-apps/src/python/_pjsua.so: source/pjsip-apps/src/python/_pjsua.o
 	$(ECHO_PREFIX) Linking python bindings $(@F)
-	$(CMD_PREFIX) gcc -shared -pthread -o $@ $< $(LDFLAGS) $(PJ_LDFLAGS) $(APP_LDLIBS) $(PYTHONDEV_LIB) $(REALLY_QUIET)
+	$(CMD_PREFIX) $(CC) -shared -pthread -o $@ $< $(LDFLAGS) $(PJ_LDFLAGS) $(APP_LDLIBS) $(PYTHONDEV_LIB) $(REALLY_QUIET)
 
 _install: _all
 	@if [ ! -d "$(DESTDIR)$(ASTDATADIR)/third-party/pjproject" ]; then \
