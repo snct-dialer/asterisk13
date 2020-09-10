@@ -1,7 +1,240 @@
-2020-07-16 15:57 +0000  Asterisk Development Team <asteriskteam@digium.com>
+2020-09-03 08:50 +0000  Asterisk Development Team <asteriskteam@digium.com>
 
-	* asterisk 13.35.0 Released.
+	* asterisk 13.36.0 Released.
 
+2020-09-01 09:20 +0000  Asterisk Development Team <asteriskteam@digium.com>
+
+	* asterisk 13.36.0-rc2 Released.
+
+2020-08-28 04:29 +0000 [aca3c550b5]  Joshua C. Colp <jcolp@sangoma.com>
+
+	* parking: Copy parker UUID as well.
+
+	  When fixing issues uncovered by GCC10 a copy of the parker UUID
+	  was removed accidentally. This change restores it so that the
+	  subscription has the data it needs.
+
+	  ASTERISK-29042
+
+	  Change-Id: I7d396a14ea648bd26d3c363dd78e78bd386b544a
+
+2020-08-26 08:55 +0000 [7f46923ebd]  Sean Bright <sean.bright@gmail.com>
+
+	* app_voicemail: Fix pollmailboxes
+
+	  The name of the voicemail context was overwriting the name of the
+	  subscribed mailbox. Fix by simplifying how we create the MWI
+	  subscription.
+
+	  ASTERISK-29029 #close
+
+	  Change-Id: Ie8a7db6a0b68f3995b0846bbb733a21909ba44e5
+
+2020-08-27 05:31 +0000 [8d6c2221a9]  Joshua C. Colp <jcolp@sangoma.com>
+
+	* pbx: Fix hints deadlock between reload and ExtensionState.
+
+	  When the ExtensionState AMI action is executed on a pattern matched
+	  hint it can end up adding a new hint if one does not already exist.
+	  This results in a locking order of contexts -> hints -> contexts.
+
+	  If at the same time a reload is occurring and adding its own hint
+	  it will have a locking order of hints -> contexts.
+
+	  This results in a deadlock as one thread wants a lock on contexts
+	  that the other has, and the other thread wants a lock on hints
+	  that the other has.
+
+	  This change enforces a hints -> contexts locking order by explicitly
+	  locking hints in the places where a hint is added when queried for.
+	  This matches the order seen through normal adding of hints.
+
+	  ASTERISK-29046
+
+	  Change-Id: I49f027f4aab5d2d50855ae937bcf5e2fd8bfc504
+
+2020-08-20 10:03 +0000  Asterisk Development Team <asteriskteam@digium.com>
+
+	* asterisk 13.36.0-rc1 Released.
+
+2020-02-18 06:30 +0000 [56f446482b]  Dennis Buteyn <dennis.buteyn@xorcom.com>
+
+	* chan_sip: Clear ToHost property on peer when changing to dynamic host
+
+	  The ToHost parameter was not cleared when a peer's host value was
+	  changed to dynamic. This causes invites to be sent to the original host.
+
+	  ASTERISK-29011 #close
+
+	  Change-Id: I9678d512741f71baca8f131a65b7523020b07d5c
+
+2020-07-10 18:14 +0000 [53f9bbdc2d]  sungtae kim <sungtae@messagebird.com>
+
+	* stasis_bridge.c: Fixed wrong video_mode shown
+
+	  Currently, if the bridge has created by the ARI, the video_mode
+	  parameter was
+	  not shown in the BridgeCreated event correctly.
+
+	  Fixed it and added video_mode shown in the 'bridge show <bridge id>'
+	  cli.
+
+	  ASTERISK-28987
+
+	  Change-Id: I8c205126724e34c2bdab9380f523eb62478e4295
+
+2020-08-06 09:58 +0000 [7379a54424]  Sean Bright <sean.bright@gmail.com>
+
+	* res_musiconhold.c: Prevent crash with realtime MoH
+
+	  The MoH class internal file vector is potentially being manipulated by
+	  multiple threads at the same time without sufficient locking. Switch to
+	  a reference counted list and operate on copies where necessary.
+
+	  ASTERISK-28927 #close
+
+	  Change-Id: I479c5dcf88db670956e8cac177b5826c986b0217
+
+2020-08-04 10:51 +0000 [46fb9fb663]  Sean Bright <sean.bright@gmail.com>
+
+	* vector.h: Fix implementation of AST_VECTOR_COMPACT() for empty vectors
+
+	  The assumed behavior of realloc() - that it was effectively a free() if
+	  its second argument was 0 - is Linux specific behavior and is not
+	  guaranteed by either POSIX or the C specification.
+
+	  Instead, if we want to resize a vector to 0, do it explicitly.
+
+	  Change-Id: Ife31d4b510ebab41cb5477fdc7ea4e3138ca8b4f
+
+2020-06-30 10:40 +0000 [dd739f8a08]  Michael Neuhauser <mike@firmix.at>
+
+	* pjproject: clone sdp to protect against (nat) modifications
+
+	  PJSIP, UDP transport with external_media_address and session timers
+	  enabled. Connected to SIP server that is not in local net. Asterisk
+	  initiated the connection and is refreshing the session after 150s
+	  (timeout 300s). The 2nd refresh-INVITE triggered by the pjsip timer has
+	  a malformed IP address in its SDP (garbage string). This only happens
+	  when the SDP is modified by the nat-code to replace the local IP address
+	  with the configured external_media_address.
+	  Analysis: the code to modify the SDP (in
+	  res_pjsip_session.c:session_outgoing_nat_hook() and also (redundantly?)
+	  in res_pjsip_sdp_rtp.c:change_outgoing_sdp_stream_media_address()) uses
+	  the tdata->pool to allocate the replacement string. But the same
+	  pjmedia_sdp_stream that was modified for the 1st refresh-INVITE is also
+	  used for the 2nd refresh-INVITE (because it is stored in pjmedia's
+	  pjmedia_sdp_neg structure). The problem is, that at that moment, the
+	  tdata->pool that holds the stringified external_media_address from the
+	  1. refresh-INVITE has long been reused for something else.
+	  Fix by Sauw Ming of pjproject (see
+	  https://github.com/pjsip/pjproject/pull/2476): the local, potentially
+	  modified pjmedia_sdp_stream is cloned in
+	  pjproject/source/pjsip/src/pjmedia/sip_neg.c:process_answer() and the
+	  clone is stored, thereby detaching from the tdata->pool (which is only
+	  released *after* process_answer())
+
+	  ASTERISK-28973
+	  Reported-by: Michael Neuhauser
+
+	  Change-Id: I272ac22436076596e06aa51b9fa23fd1c7734a0e
+
+2020-07-22 04:41 +0000 [5c0d247d69]  Joshua C. Colp <jcolp@sangoma.com>
+
+	* res_pjsip_registrar: Don't specify an expiration for static contacts.
+
+	  Statically configured contacts on an AOR don't have an expiration
+	  time so when adding them to the resulting 200 OK if an endpoint
+	  registers ensure they are marked as such.
+
+	  ASTERISK-28995
+
+	  Change-Id: I9f0e45eb2ccdedc9a0df5358634a19ccab0ad596
+
+2020-07-13 15:06 +0000 [718efe9365]  Sean Bright <sean.bright@gmail.com>
+
+	* utf8.c: Add UTF-8 validation and utility functions
+
+	  There are various places in Asterisk - specifically in regards to
+	  database integration - where having some kind of UTF-8 validation would
+	  be beneficial. This patch adds:
+
+	  * Functions to validate that a given string contains only valid UTF-8
+	    sequences.
+
+	  * A function to copy a string (similar to ast_copy_string) stopping when
+	    an invalid UTF-8 sequence is encountered.
+
+	  * A UTF-8 validator that allows for progressive validation.
+
+	  All of this is based on the excellent UTF-8 decoder by Björn Höhrmann.
+	  More information is available here:
+
+	      https://bjoern.hoehrmann.de/utf-8/decoder/dfa/
+
+	  The API was written in such a way that should allow us to replace the
+	  implementation later should we determine that we need something more
+	  comprehensive.
+
+	  Change-Id: I3555d787a79e7c780a7800cd26e0b5056368abf9
+
+2020-07-20 13:17 +0000 [4fec6da25b]  Sean Bright <sean.bright@gmail.com>
+
+	* vector.h: Add AST_VECTOR_SORT()
+
+	  Allows a vector to be sorted in-place, rather than only during
+	  insertion.
+
+	  Change-Id: I22cba9ddf556a7e44dacc53c4431bd81dd2fa780
+
+2020-07-16 08:41 +0000 [f6afac1b37]  George Joseph <gjoseph@digium.com>
+
+	* CI: Force publishAsteriskDocs to use python2
+
+	  Change-Id: I7d951e75ad2d472fa096647dfb55670b11105e23
+
+2020-07-13 15:42 +0000 [ff90e00677]  Sean Bright <sean.bright@gmail.com>
+
+	* acl.c: Coerce a NULL pointer into the empty string
+
+	  If an ACL is misconfigured in the realtime database (for instance, the
+	  "rule" is blank) and Asterisk attempts to read the ACL, Asterisk will
+	  crash.
+
+	  ASTERISK-28978 #close
+
+	  Change-Id: Ic1536c4df856231bfd2da00128f7822224d77610
+
+2020-07-13 04:41 +0000 [bcdc3ec645]  Joshua C. Colp <jcolp@sangoma.com>
+
+	* pjsip: Include timer patch to prevent cancelling timer 0.
+
+	  I noticed this while looking at another issue and brought
+	  it up with Teluu. It was possible for an uninitialized timer
+	  to be cancelled, resulting in the invalid timer id of 0
+	  being placed into the timer heap causing issues.
+
+	  This change is a backport from the pjproject repository
+	  preventing this from happening.
+
+	  Change-Id: I1ba318b1f153a6dd7458846396e2867282b428e7
+
+2020-07-02 17:19 +0000 [f8f934b545]  Nickolay Shmyrev <nshmyrev@alphacephei.com>
+
+	* res_http_websocket: Avoid reading past end of string
+
+	  We read beyond the end of the buffer when copying the string out of the
+	  buffer when we used ast_copy_string() because the original string was
+	  not null terminated. Instead switch to ast_strndup() which does not
+	  exhibit the same behavior.
+
+	  ASTERISK-28975 #close
+
+	  Change-Id: Ib4a75cffeb1eb8cf01136ef30306bd623e531a2a
+
+2020-07-09 10:27 +0000 [77a5383957]  Asterisk Development Team <asteriskteam@digium.com>
+
+	* Update CHANGES and UPGRADE.txt for 13.35.0
 2020-07-09 15:33 +0000  Asterisk Development Team <asteriskteam@digium.com>
 
 	* asterisk 13.35.0-rc1 Released.

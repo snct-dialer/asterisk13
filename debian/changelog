@@ -1,3 +1,59 @@
+asterisk (2:13.35.0~se-6) UNRELEASED; urgency=medium
+
+  * d/p/0135-ast_frame_adjust_volume.patch:
+    - Move log level from LOG_WARNING to LOG_ERROR.
+    - Remove log within the loop.
+
+ -- Jörg Frings-Fürst <debian@jff.email>  Wed, 19 Aug 2020 12:21:02 +0200
+
+asterisk (2:13.35.0~se-5.buster) buster; urgency=medium
+
+  * Fix typo at d/p/0135-ast_frame_adjust_volume.patch (buster).
+
+ -- Jörg Frings-Fürst <debian@jff.email>  Wed, 19 Aug 2020 07:58:51 +0200
+
+asterisk (2:13.35.0~se-5.stretch) stretch; urgency=medium
+
+  * Fix typo at d/p/0135-ast_frame_adjust_volume.patch.
+
+ -- Jörg Frings-Fürst <debian@jff.email>  Wed, 19 Aug 2020 07:58:51 +0200
+
+asterisk (2:13.35.0~se-4.buster) buster; urgency=medium
+
+  * New debian/patches/0135-ast_frame_adjust_volume.patch (buster).
+
+ -- Jörg Frings-Fürst <debian@jff.email>  Tue, 18 Aug 2020 18:36:09 +0200
+
+asterisk (2:13.35.0~se-4.stretch) stretch; urgency=medium
+
+  * New debian/patches/0135-ast_frame_adjust_volume.patch.
+
+ -- Jörg Frings-Fürst <debian@jff.email>  Tue, 18 Aug 2020 18:36:09 +0200
+
+asterisk (2:13.35.0~se-3.buster) buster; urgency=medium
+
+  * Remove debug settings (buster).
+
+ -- Jörg Frings-Fürst <debian@jff.email>  Mon, 17 Aug 2020 21:12:20 +0200
+
+asterisk (2:13.35.0~se-3.stretch) stretch; urgency=medium
+
+  * Remove debug settings.
+
+ -- Jörg Frings-Fürst <debian@jff.email>  Mon, 17 Aug 2020 21:12:20 +0200
+
+asterisk (2:13.35.0~se-2.buster) buster; urgency=medium
+
+  * Debug release (buster).
+
+ -- Jörg Frings-Fürst <debian@jff.email>  Mon, 17 Aug 2020 19:48:09 +0200
+
+asterisk (2:13.35.0~se-2.stretch) stretch; urgency=medium
+
+  * Debug release.
+
+ -- Jörg Frings-Fürst <debian@jff.email>  Mon, 17 Aug 2020 19:48:09 +0200
+
 asterisk (2:13.35.0~se-1.buster) buster; urgency=medium
 
   * New upstream release.
