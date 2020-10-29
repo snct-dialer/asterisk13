@@ -1162,11 +1162,13 @@ static pj_bool_t session_reinvite_on_rx_request(pjsip_rx_data *rdata)
 			pjmedia_sdp_media *m = local->media[i];
 			pjmedia_sdp_attr *recvonly;
 			pjmedia_sdp_attr *inactive;
+			pjmedia_sdp_attr *sendonly;
 
 			recvonly = pjmedia_sdp_attr_find2(m->attr_count, m->attr, "recvonly", NULL);
 			inactive = pjmedia_sdp_attr_find2(m->attr_count, m->attr, "inactive", NULL);
-			if (recvonly || inactive) {
-				pjmedia_sdp_attr *to_remove = recvonly ?: inactive;
+			sendonly = pjmedia_sdp_attr_find2(m->attr_count, m->attr, "sendonly", NULL);
+			if (recvonly || inactive || sendonly) {
+				pjmedia_sdp_attr *to_remove = recvonly ?: inactive ?: sendonly;
 				pjmedia_sdp_attr *sendrecv;
 
 				pjmedia_sdp_attr_remove(&m->attr_count, m->attr, to_remove);
@@ -2887,8 +2889,11 @@ static void session_inv_on_tsx_state_changed(pjsip_inv_session *inv, pjsip_trans
 							ast_sip_session_send_request_with_cb(session, tdata, cb);
 							return;
 						}
-						if (tsx->status_code != 488) {
-							/* Other reinvite failures (except 488) result in destroying the session. */
+						/* Per RFC3261 14.1 a response to a re-INVITE should only terminate
+						 * the dialog if a 481 or 408 occurs. All other responses should leave
+						 * the dialog untouched.
+						 */
+						if (tsx->status_code == 481 || tsx->status_code == 408) {
 							if (pjsip_inv_end_session(inv, 500, NULL, &tdata) == PJ_SUCCESS
 								&& tdata) {
 								ast_sip_session_send_request(session, tdata);

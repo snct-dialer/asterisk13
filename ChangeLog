@@ -1,12 +1,63 @@
-2020-09-03 08:50 +0000  Asterisk Development Team <asteriskteam@digium.com>
+2020-10-19 18:10 +0000  Asterisk Development Team <asteriskteam@digium.com>
 
-	* asterisk 13.36.0 Released.
+	* asterisk 13.37.0 Released.
 
-2020-09-01 09:20 +0000  Asterisk Development Team <asteriskteam@digium.com>
+2020-09-09 14:11 +0000  Asterisk Development Team <asteriskteam@digium.com>
 
-	* asterisk 13.36.0-rc2 Released.
+	* asterisk 13.37.0-rc1 Released.
 
-2020-08-28 04:29 +0000 [aca3c550b5]  Joshua C. Colp <jcolp@sangoma.com>
+2020-09-09 09:00 +0000 [8ccae31f5d]  Asterisk Development Team <asteriskteam@digium.com>
+
+	* Update CHANGES and UPGRADE.txt for 13.37.0
+2020-09-01 08:43 +0000 [d649ab4a30]  Patrick Verzele <patrick@verzele.be>
+
+	* res_pjsip_session: Deferred re-INVITE without SDP send a=sendrecv instead of a=sendonly
+
+	  Building on ASTERISK-25854. When the device requests hold by sending SDP with attribute recvonly, asterisk places the session in sendonly mode. When the device later requests to resume the call by using a re-INVITE excluding SDP, asterisk needs to change the sendonly mode to sendrecv again.
+
+	  Change-Id: I60341ce3d87f95869f3bc6dc358bd3e8286477a6
+
+2020-08-26 04:58 +0000 [0064aa0107]  Kfir Itzhak <mastertheknife@gmail.com>
+
+	* app_queue: Fix leave-empty not recording a call as abandoned
+
+	  This fixes a bug introduced mistakenly in ASTERISK-25665:
+	  If leave-empty is enabled, a call may sometimes be removed from
+	  a queue without recording it as abandoned.
+	  This causes Asterisk to not generate an abandon event for that
+	  call, and for the queue abandoned counter to be incorrect.
+
+	  ASTERISK-29043 #close
+
+	  Change-Id: I1a71b81df78adff59af587f1d8483cf57df430c7
+
+2020-08-28 09:34 +0000 [bc615ee4c4]  George Joseph <gjoseph@digium.com>
+
+	* ast_coredumper: Fix issues with naming
+
+	  If you run ast_coredumper --tarball-coredumps in the same directory
+	  as the actual coredump, tar can fail because the link to the
+	  actual coredump becomes recursive.  The resulting tarball will
+	  have everything _except_ the coredump (which is usually what
+	  you need)
+
+	  There's also an issue that the directory name in the tarball
+	  is the same as the coredump so if you extract the tarball the
+	  directory it creates will overwrite the coredump.
+
+	  So:
+
+	   * Made the link to the coredump use the absolute path to the
+	     file instead of a relative one.  This prevents the recursive
+	     link and allows tar to add the coredump.
+
+	   * The tarballed directory is now named <coredump>.output instead
+	     of just <coredump> so if you expand the tarball it won't
+	     overwrite the coredump.
+
+	  Change-Id: I8b3eeb26e09a577c702ff966924bb0a2f9a759ea
+
+2020-08-28 04:29 +0000 [dc6d3a746c]  Joshua C. Colp <jcolp@sangoma.com>
 
 	* parking: Copy parker UUID as well.
 
@@ -18,7 +69,20 @@
 
 	  Change-Id: I7d396a14ea648bd26d3c363dd78e78bd386b544a
 
-2020-08-26 08:55 +0000 [7f46923ebd]  Sean Bright <sean.bright@gmail.com>
+2016-05-03 11:11 +0000 [c111777756]  Tzafrir Cohen <tzafrir@debian.org>
+
+	* followme: allow disabling callee prompt
+
+	  Add the option 'enable_callee_prompt' to followme.conf. Enabled by
+	  default. If disabled, a callee is not prompted to accept or reject
+	  the forwarded call.
+
+	  ASTERISK-29010 #close
+
+	  Change-Id: Ic15a2bac4f16d0fce7a1b5e7b375f9bafee37aa4
+	  Signed-off-by: Tzafrir Cohen <tzafrir.cohen@xorcom.com>
+
+2020-08-26 08:55 +0000 [4cc8d29fd3]  Sean Bright <sean.bright@gmail.com>
 
 	* app_voicemail: Fix pollmailboxes
 
@@ -30,7 +94,40 @@
 
 	  Change-Id: Ie8a7db6a0b68f3995b0846bbb733a21909ba44e5
 
-2020-08-27 05:31 +0000 [8d6c2221a9]  Joshua C. Colp <jcolp@sangoma.com>
+2020-08-26 10:43 +0000 [384f2638b2]  Alexander Traud <pabstraud@compuserve.com>
+
+	* sip_nat_settings: Update script for latest Linux.
+
+	  With the latest Linux, 'ifconfig' is not installed on default anymore.
+	  Furthermore, the output of the current net-tools 'ifconfig' changed.
+	  Therefore, parsing failed. This update uses 'ip addr show' instead.
+	  Finally, the service for the external IP changed.
+
+	  Change-Id: I9b1a7c3f457e3553b50a3e9a55524e40d70245a0
+
+2020-08-26 10:19 +0000 [8055807be2]  Alexander Traud <pabstraud@compuserve.com>
+
+	* samples: Fix keep_alive_interval default in pjsip.conf.
+
+	  Since ASTERISK_27978 the default is not off but 90 seconds. That change
+	  happened because ASTERISK_27347 disabled the keep-alives in the bundled
+	  PJProject and Asterisk should behave the same as before.
+
+	  Change-Id: Ie63dc558ade6a5a2b969c30a4bd492d63730dc46
+
+2020-08-24 16:26 +0000 [bf139ff519]  Kevin Harwell <kharwell@digium.com>
+
+	* chan_pjsip: disallow PJSIP_SEND_SESSION_REFRESH pre-answer execution
+
+	  This patch makes it so if the PJSIP_SEND_SESSION_REFRESH dialplan function
+	  is called on a channel prior to answering a warning is issued and the
+	  function returns unsuccessful.
+
+	  ASTERISK-28878 #close
+
+	  Change-Id: I053f767d10cf3b2b898fa9e3e7c35ff07e23c9bb
+
+2020-08-27 05:31 +0000 [e519d28fe0]  Joshua C. Colp <jcolp@sangoma.com>
 
 	* pbx: Fix hints deadlock between reload and ExtensionState.
 
@@ -52,6 +149,84 @@
 	  ASTERISK-29046
 
 	  Change-Id: I49f027f4aab5d2d50855ae937bcf5e2fd8bfc504
+
+2020-08-21 16:53 +0000 [fd49b4b43c]  Nickolay Shmyrev <nshmyrev@alphacephei.com>
+
+	* res_speech: Bump reference on format object
+
+	  Properly bump reference on format object to avoid memory corruption on double free
+
+	  ASTERISK-29040 #close
+
+	  Change-Id: Ic5a7faabfe2ef965ddb024186e1de7ca4542e2a3
+
+2020-07-22 03:45 +0000 [efb682c8f2]  Torrey Searle <tsearle@voxbone.com>
+
+	* res_pjsip_diversion: handle 181
+
+	  Adapt the response handler so it also called when 181 is received.
+	  In the case 181 is received, also generate the 181 response.
+
+	  ASTERISK-29001 #close
+
+	  Change-Id: I73cfee46a8ca85371280ebdb38674f8fde7510df
+
+2020-08-21 09:17 +0000 [273f819dfe]  Sean Bright <sean.bright@gmail.com>
+
+	* app_voicemail: Process urgent messages with mailcmd
+
+	  Rather than putting messages into INBOX and then moving them to Urgent
+	  later, put them directly in to the Urgent folder. This prevents
+	  mailcmd from being skipped.
+
+	  ASTERISK-27273 #close
+
+	  Change-Id: I49934e093290d308506ab8d45a40ef705c5ae4f5
+
+2020-08-18 04:36 +0000 [02dee3986a]  Joshua C. Colp <jcolp@sangoma.com>
+
+	* res_pjsip_session: Don't aggressively terminate on failed re-INVITE.
+
+	  Per the RFC when an outgoing re-INVITE is done we should
+	  only terminate the dialog if a 481 or 408 is received.
+
+	  ASTERISK-29033
+
+	  Change-Id: I6c3ff513aa41005d02de0396ba820083e9b18503
+
+2020-08-20 08:57 +0000 [c7df06a077]  George Joseph <gjoseph@digium.com>
+
+	* scope_trace: Updated macro stubs to match other branches
+
+	  Although scope tracing isn't actually implemented in this branch,
+	  macro stubs had been added to allow code that used scope tracing
+	  to be cherry-picked to this branch without modification.
+
+	  To match the other branches, the following changes were made
+	  to the stubs...
+
+	  The SCOPE_ENTER and SCOPE_EXIT* macros now print debug messages
+	  at the same level as the scope level.  This allows the same
+	  messages to be printed to the debug log when AST_DEVMODE
+	  isn't enabled.
+
+	  Also added a few variants of the SCOPE_EXIT macros that will
+	  also call ast_log instead of ast_debug to make it easier to
+	  use scope tracing and still print error messages.
+
+	  Change-Id: Ifc281793a5b91c84a4f1633db9d07006d31585ed
+
+2020-08-19 12:29 +0000 [179530558d]  Sean Bright <sean.bright@gmail.com>
+
+	* bridge_channel: Ensure text messages are zero terminated
+
+	  T.140 data in RTP is not zero terminated, so when we are queuing a text
+	  frame on a bridge we need to ensure that we are passing a zero
+	  terminated string.
+
+	  ASTERISK-28974 #close
+
+	  Change-Id: Ic10057387ce30b2094613ea67e3ae8c5c431dda3
 
 2020-08-20 10:03 +0000  Asterisk Development Team <asteriskteam@digium.com>
 
