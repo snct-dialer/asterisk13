@@ -70,10 +70,11 @@ Build-Depends:
  libxml2-dev,
  libxslt1-dev,
  portaudio19-dev,
+ python3-minimal,
  unixodbc-dev,
  uuid-dev,
  wget,
- bash,
+# bash,
  zlib1g-dev
 Standards-Version: 3.9.8
 Homepage: http://www.asterisk.org/
