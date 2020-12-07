@@ -1,11 +1,11 @@
-asterisk (2:13.37.0~se-1) UNRELEASED; urgency=medium
+asterisk (2:13.37.1~se-1.stretch) stretch; urgency=medium
 
   * d/p/0135-ast_frame_adjust_volume.patch:
     - Move log level from LOG_WARNING to LOG_ERROR.
     - Remove log within the loop.
   * New upstream release.
 
- -- Jörg Frings-Fürst <debian@jff.email>  Thu, 29 Oct 2020 18:38:48 +0100
+ -- Jörg Frings-Fürst <debian@jff.email>  Thu, 12 Nov 2020 16:40:29 +0100
 
 asterisk (2:13.35.0~se-5.buster) buster; urgency=medium
 
