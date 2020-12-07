@@ -1,24 +1,15 @@
-2020-11-05 21:03 +0000  Asterisk Development Team <asteriskteam@digium.com>
+2020-11-19 12:31 +0000  Asterisk Development Team <asteriskteam@digium.com>
 
-	* asterisk 13.37.1 Released.
+	* asterisk 13.38.0 Released.
 
-2020-11-02 10:29 +0000 [66737026ef]  Ben Ford <bford@digium.com>
+2020-11-12 11:55 +0000  Asterisk Development Team <asteriskteam@digium.com>
 
-	* AST-2020-002 - res_pjsip: Stop sending INVITEs after challenge limit.
+	* asterisk 13.38.0-rc1 Released.
 
-	  If Asterisk sends out an INVITE and receives a challenge with a
-	  different nonce value each time, it will continuously send out INVITEs,
-	  even if the call is hung up. The endpoint must be configured for
-	  outbound authentication for this to occur. A limit has been set on
-	  outbound INVITEs so that, once reached, Asterisk will stop sending
-	  INVITEs and the transaction will terminate.
+2020-11-12 05:45 +0000 [c7d3c071dd]  Asterisk Development Team <asteriskteam@digium.com>
 
-	  ASTERISK-29013
-
-	  Change-Id: I2d001ca745b00ca8aa12030f2240cd72363b46f7
-	  (cherry picked from commit 01b7ac0d590b0ad2e3e856d1a81fc87154ae68a0)
-
-2020-10-19 17:21 +0000 [1f169177ed]  Kevin Harwell <kharwell@digium.com>
+	* Update CHANGES and UPGRADE.txt for 13.38.0
+2020-10-19 17:21 +0000 [b87527b000]  Kevin Harwell <kharwell@digium.com>
 
 	* AST-2020-001 - res_pjsip: Return dialog locked and referenced
 
@@ -44,11 +35,280 @@
 	  ASTERISK-29057 #close
 
 	  Change-Id: I5ef645a47829596f402cf383dc02c629c618969e
-	  (cherry picked from commit b87527b000af5e8e28bdc2657f11d4d4a6f07500)
 
-2020-10-19 18:10 +0000  Asterisk Development Team <asteriskteam@digium.com>
+2020-11-02 10:29 +0000 [01b7ac0d59]  Ben Ford <bford@digium.com>
 
-	* asterisk 13.37.0 Released.
+	* AST-2020-002 - res_pjsip: Stop sending INVITEs after challenge limit.
+
+	  If Asterisk sends out an INVITE and receives a challenge with a
+	  different nonce value each time, it will continuously send out INVITEs,
+	  even if the call is hung up. The endpoint must be configured for
+	  outbound authentication for this to occur. A limit has been set on
+	  outbound INVITEs so that, once reached, Asterisk will stop sending
+	  INVITEs and the transaction will terminate.
+
+	  ASTERISK-29013
+
+	  Change-Id: I2d001ca745b00ca8aa12030f2240cd72363b46f7
+
+2020-10-23 10:26 +0000 [a581fcfe0c]  Alexander Traud <pabstraud@compuserve.com>
+
+	* chan_sip: On authentication, pick MD5 for sure.
+
+	  RFC 8760 added new digest-access-authentication schemes. Testing
+	  revealed that chan_sip does not pick MD5 if several schemes are offered
+	  by the User Agent Server (UAS). This change does not implement any of
+	  the new schemes like SHA-256. This change makes sure, MD5 is picked so
+	  UAS with SHA-2 enabled, like the service www.linphone.org/freesip, can
+	  still be used. This should have worked since day one because SIP/2.0
+	  already envisioned several schemes (see RFC 3261 and its augmented BNF
+	  for 'algorithm' which includes 'token' as third alternative; note: if
+	  'algorithm' was not present, MD5 is still assumed even in RFC 7616).
+
+	  Change-Id: I61ca0b1f74b5ec2b5f3062c2d661cafeaf597fcd
+
+2020-06-04 09:23 +0000 [bee2e3e720]  Walter Doekes <walter+asterisk@wjd.nu>
+
+	* main/say: Work around gcc 9 format-truncation false positive
+
+	  Version: gcc (Ubuntu 9.3.0-10ubuntu2) 9.3.0
+	  Warning:
+	    say.c:2371:24: error: ‘%d’ directive output may be truncated writing
+	      between 1 and 11 bytes into a region of size 10
+	      [-Werror=format-truncation=]
+	    2371 |     snprintf(buf, 10, "%d", num);
+	    say.c:2371:23: note: directive argument in the range [-2147483648, 9]
+
+	  That's not possible though, as the if() starts out checking for (num < 0),
+	  making this Warning a false positive.
+
+	  (Also replaced some else<TAB>if with else<SP>if while in the vicinity.)
+
+	  Change-Id: Ic7a70120188c9aa525a6d70289385bfce878438a
+
+2020-10-19 15:31 +0000 [ca8f0b1d21]  Kevin Harwell <kharwell@digium.com>
+
+	* res_pjsip, res_pjsip_session: initialize local variables
+
+	  This patch initializes a couple of local variables to some default values.
+	  Interestingly, in the 'pj_status_t dlg_status' case the value not being
+	  initialized caused memory to grow, and not be recovered, in the off nominal
+	  path (at least on my machine).
+
+	  Change-Id: I22ee65e1e1bff8efacea8a167c6c8428898523f7
+
+2020-10-23 09:55 +0000 [5bc784130e]  Alexander Traud <pabstraud@compuserve.com>
+
+	* install_prereq: Add GMime 3.0.
+
+	  Ubuntu 20.10 does not come with GMime 2.6. Ubuntu 16.04 LTS does not
+	  come with GMime 3.0. aptitude ignores any missing package. Therefore,
+	  it installs the correct package(s). However, in Ubuntu 18.04 LTS and
+	  Ubuntu 20.04 LTS, both versions are installed alongside although only
+	  one is really needed.
+
+	  Change-Id: Ic58aa9f2e131d94671f286f17dbd61e1ccbabcb7
+
+2020-10-23 09:49 +0000 [55f83b01f8]  Alexander Traud <pabstraud@compuserve.com>
+
+	* BuildSystem: Enable Lua 5.4.
+
+	  Note to maintainers: Lua 5.4, Lua 5.3, and Lua 5.2 have not been tested
+	  at runtime with pbx_lua. Until then, use the lowest available version
+	  of Lua, if you enabled the module pbx_lua at all.
+
+	  Change-Id: Ie5270448b11fcb4e2a53d899e4fe7fea793ce7e0
+
+2020-10-19 13:04 +0000 [e2bbb93de2]  Asterisk Development Team <asteriskteam@digium.com>
+
+	* Update CHANGES and UPGRADE.txt for 13.37.0
+2020-10-12 05:30 +0000 [849ace4af9]  Joshua C. Colp <jcolp@sangoma.com>
+
+	* asterisk: Add verbose message stating support status.
+
+	  This change outputs a message at startup and when a remote
+	  console is connected stating that this branch is no longer
+	  receiving bug fixes and to consult the Asterisk Versions wiki
+	  page for status information.
+
+	  Change-Id: I6b8a77d33e338a3e52dd65f998d8a07e4d16aa2e
+
+2020-10-05 10:44 +0000 [d590f63163]  Jean Aunis <jean.aunis@prescom.fr>
+
+	* resource_endpoints.c: memory leak when providing a 404 response
+
+	  When handling a send_message request to a non-existing endpoint, the response's
+	  body is overriden and not properly freed.
+
+	  ASTERISK-29108
+
+	  Change-Id: Ie1d3d70065f80793445b60f5e4a7eb31b4b9c5c8
+
+2020-09-29 13:04 +0000 [715235202d]  Sean Bright <sean.bright@gmail.com>
+
+	* pbx.c: On error, ast_add_extension2_lockopt should always free 'data'
+
+	  In the event that the desired extension already exists,
+	  ast_add_extension2_lockopt() will free the 'data' it is passed before
+	  returning an error, so we should not be freeing it ourselves.
+
+	  Additionally, there were two places where ast_add_extension2_lockopt()
+	  could return an error without also freeing the 'data' pointer, so we
+	  add that.
+
+	  ASTERISK-29097 #close
+
+	  Change-Id: I904707aae55169feda050a5ed7c6793b53fe6eae
+
+2020-09-29 19:57 +0000 [48b64326c6]  Sean Bright <sean.bright@gmail.com>
+
+	* app_voicemail.c: Document VMSayName interruption behavior
+
+	  ASTERISK-26424 #close
+
+	  Change-Id: I797ad0ed302d0b3d2c90543eff5b7207ed08ecf0
+
+2020-09-22 22:39 +0000 [e60c7731be]  Holger Hans Peter Freyther <holger@moiji-mobile.com>
+
+	* res_pjsip_sdp_rtp: Fix accidentally native bridging calls
+
+	  Stop advertising RFC2833 support on the rtp_engine when DTMF mode is
+	  auto but no tel_event was found inside SDP file.
+
+	  On an incoming call create_rtp will be called and when session->dtmf is
+	  set to AST_SIP_DTMF_AUTO, the AST_RTP_PROPERTY_DTMF will be set without
+	  looking at the SDP file.
+
+	  Once get_codecs gets called we move the DTMF mode from RFC2833 to INBAND
+	  but continued to advertise RFC2833 support.
+
+	  This meant the native_rtp bridge would falsely consider the two channels
+	  as compatible. In addition to changing the DTMF mode we now set or
+	  remove the AST_RTP_PROPERTY_DTMF.
+
+	  The property is checked in ast_rtp_dtmf_compatible and called by
+	  native_rtp_bridge_compatible.
+
+	  ASTERISK-29051 #close
+
+	  Change-Id: I1e0c1e324598a437932c0b7836bcb626aba8e287
+
+2020-09-24 09:54 +0000 [279c202da6]  Torrey Searle <tsearle@voxbone.com>
+
+	* res_pjsip_diversion: fix double 181
+
+	  Arming response to both AST_SIP_SESSION_BEFORE_REDIRECTING and
+	  AST_SIP_SESSION_BEFORE_MEDIA causes 302 to to be handled twice,
+	  resulting in to 181 being generated.
+
+	  Change-Id: I866e5461564644ffb8a5e12b6f1330b50a7b63ab
+
+2020-09-23 15:20 +0000 [8d28d964d1]  Sean Bright <sean.bright@gmail.com>
+
+	* dsp.c: Update calls to ast_format_cmp to check result properly
+
+	  ASTERISK-28311 #close
+
+	  Change-Id: Ib1ce8fc1a8752751f5bf3615c59245532dfd9aa2
+
+2020-09-18 15:02 +0000 [dde85bae7f]  Sean Bright <sean.bright@gmail.com>
+
+	* res_musiconhold: Start playlist after initial announcement
+
+	  Only track our sample offset if we are playing a non-announcement file,
+	  otherwise we will skip that number of samples when we start playing the
+	  first MoH file.
+
+	  ASTERISK-24329 #close
+
+	  Change-Id: Ib6b3c84fcaa1063889ab38ba7e7fc50050a3ccfc
+
+2020-09-16 08:01 +0000 [9a62d1fd2a]  Michal Hajek <michal.hajek@daktela.com>
+
+	* res_stasis.c: Add compare function for bridges moh container
+
+	  Sometimes not play MOH on bridge.
+
+	  ASTERISK-29081
+	  Reported-by: Michal Hajek <michal.hajek@daktela.com>
+
+	  Change-Id: I760c73e0c9be1d340303b5d1c18a00c4759e8232
+
+2020-09-18 08:09 +0000 [59492c475c]  Sean Bright <sean.bright@gmail.com>
+
+	* func_curl.c: Prevent crash when using CURLOPT(httpheader)
+
+	  Because we use shared thread-local cURL instances, we need to ensure
+	  that the state of the cURL instance is correct before each invocation.
+
+	  In the case of custom headers, we were not resetting cURL's internal
+	  HTTP header pointer which could result in a crash if subsequent
+	  requests do not configure custom headers.
+
+	  ASTERISK-29085 #close
+
+	  Change-Id: I8b4ab34038156dfba613030a45f10e932d2e992d
+
+2020-08-13 03:34 +0000 [9decb33531]  Torrey Searle <tsearle@voxbone.com>
+
+	* res_pjsip_diversion: implement support for History-Info
+
+	  Implemention of History-Info capable of interworking with Diversion
+	  Header following RFC7544
+
+	  ASTERISK-29027 #close
+
+	  Change-Id: I2296369582d4b295c5ea1e60bec391dd1d318fa6
+	  (cherry picked from commit 5a12463c0709513514abd42a48039d62ca9a6155)
+
+2020-09-14 13:23 +0000 [9cd1103030]  Sean Bright <sean.bright@gmail.com>
+
+	* format_cap: Perform codec lookups by pointer instead of name
+
+	  ASTERISK-28416 #close
+
+	  Change-Id: I069420875ebdbcaada52d92599a5f7de3cb2cdf4
+
+2020-08-31 07:21 +0000 [a2ed7f2eb4]  Sungtae Kim <pchero21@gmail.com>
+
+	* realtime: Increased reg_server character size
+
+	  Currently, the ps_contacts table's reg_server column in realtime database type is varchar(20).
+	  This is fine for normal cases, but if the hostname is longer than 20, it returns error and then
+	  failed to register the contact address of the peer.
+
+	  Normally, 20 characters limitation for the hostname is fine, but with the cloud env.
+	  So, increased the size to 255.
+
+	  ASTERISK-29056
+
+	  Change-Id: Iac52c8c35030303cfa551bb39f410b33bffc507d
+
+2020-08-30 15:42 +0000 [022284f8af]  Sungtae Kim <pchero21@gmail.com>
+
+	* res_stasis.c: Added video_single option for bridge creation
+
+	  Currently, it was not possible to create bridge with video_mode single.
+	  This made hard to put the bridge in a vidoe_single mode.
+	  So, added video_single option for Bridge creation using the ARI.
+	  This allows create a bridge with video_mode single.
+
+	  ASTERISK-29055
+
+	  Change-Id: I43e720e5c83fc75fafe10fe22808ae7f055da2ae
+
+2020-08-31 11:14 +0000 [514b1d6b49]  Ben Ford <bford@digium.com>
+
+	* Bridging: Use a ref to bridge_channel's channel to prevent crash.
+
+	  There's a race condition with bridging where a bridge can be torn down
+	  causing the bridge_channel's ast_channel to become NULL when it's still
+	  needed. This particular case happened with attended transfers, but the
+	  crash occurred when trying to publish a stasis message. Now, the
+	  bridge_channel is locked, a ref to the ast_channel is obtained, and that
+	  ref is passed down the chain.
+
+	  Change-Id: Ic48715c0c041615d17d286790ae3e8c61bb28814
 
 2020-09-09 14:11 +0000  Asterisk Development Team <asteriskteam@digium.com>
 
