@@ -209,6 +209,17 @@ static void bridge_sync_signal(struct bridge_sync *sync_struct)
 	ast_sem_post(&sync_struct->sem);
 }
 
+struct ast_channel *ast_bridge_channel_get_chan(struct ast_bridge_channel *bridge_channel)
+{
+	struct ast_channel *chan;
+
+	ao2_lock(bridge_channel);
+	chan = ao2_bump(bridge_channel->chan);
+	ao2_unlock(bridge_channel);
+
+	return chan;
+}
+
 void ast_bridge_channel_lock_bridge(struct ast_bridge_channel *bridge_channel)
 {
 	struct ast_bridge *bridge;
@@ -1096,7 +1107,14 @@ int ast_bridge_channel_write_hold(struct ast_bridge_channel *bridge_channel, con
 
 int ast_bridge_channel_write_unhold(struct ast_bridge_channel *bridge_channel)
 {
-	ast_channel_publish_cached_blob(bridge_channel->chan, ast_channel_unhold_type(), NULL);
+	struct ast_channel *chan = ast_bridge_channel_get_chan(bridge_channel);
+
+	if (!chan) {
+		return -1;
+	}
+
+	ast_channel_publish_cached_blob(chan, ast_channel_unhold_type(), NULL);
+	ao2_ref(chan, -1);
 
 	return ast_bridge_channel_write_control_data(bridge_channel, AST_CONTROL_UNHOLD, NULL, 0);
 }
@@ -2293,6 +2311,41 @@ static void bridge_channel_handle_control(struct ast_bridge_channel *bridge_chan
 
 /*!
  * \internal
+ * \brief Ensure text data is zero terminated before sending
+ *
+ * \param chan Channel to send text to
+ * \param f The frame containing the text data to send
+ *
+ * \return Nothing
+ */
+static void sendtext_safe(struct ast_channel *chan, const struct ast_frame *f)
+{
+	if (f->datalen) {
+		char *text = f->data.ptr;
+
+		if (text[f->datalen - 1]) {
+			/* Not zero terminated, we need to allocate */
+			text = ast_strndup(text, f->datalen);
+			if (!text) {
+				return;
+			}
+		}
+
+		ast_sendtext(chan, text);
+
+		if (text != f->data.ptr) {
+			/* Only free if we allocated */
+			ast_free(text);
+		}
+	} else {
+		/* Special case if the frame length is zero (although I
+		 * am not sure this is possible?) */
+		ast_sendtext(chan, "");
+	}
+}
+
+/*!
+ * \internal
  * \brief Handle bridge channel write frame to channel.
  * \since 12.0.0
  *
@@ -2364,7 +2417,7 @@ static void bridge_channel_handle_write(struct ast_bridge_channel *bridge_channe
 	case AST_FRAME_TEXT:
 		ast_debug(1, "Sending TEXT frame to '%s': %*.s\n",
 			ast_channel_name(bridge_channel->chan), fr->datalen, (char *)fr->data.ptr);
-		ast_sendtext(bridge_channel->chan, fr->data.ptr);
+		sendtext_safe(bridge_channel->chan, fr);
 		break;
 	case AST_FRAME_TEXT_DATA:
 		msg = (struct ast_msg_data *)fr->data.ptr;

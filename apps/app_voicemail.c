@@ -382,6 +382,9 @@ ASTERISK_FILE_VERSION(__FILE__, "$Revision$")
 		<description>
 			<para>This application will say the recorded name of the voicemail user specified as the
 			argument to this application. If no context is provided, <literal>default</literal> is assumed.</para>
+			<para>Similar to the Background() application, playback of the recorded
+			name can be interrupted by entering an extension, which will be searched
+			for in the current context.</para>
 		</description>
 	</application>
 	<function name="MAILBOX_EXISTS" language="en_US">
@@ -1017,22 +1020,8 @@ struct mwi_sub {
 	int old_new;
 	int old_old;
 	char *uniqueid;
-	char mailbox[0];
+	char *mailbox;
 };
-
-struct mwi_sub_task {
-	const char *mailbox;
-	const char *context;
-	const char *uniqueid;
-};
-
-static void mwi_sub_task_dtor(struct mwi_sub_task *mwist)
-{
-	ast_free((void *) mwist->mailbox);
-	ast_free((void *) mwist->context);
-	ast_free((void *) mwist->uniqueid);
-	ast_free(mwist);
-}
 
 static struct ast_taskprocessor *mwi_subscription_tps;
 
@@ -6660,8 +6649,6 @@ static int leave_voicemail(struct ast_channel *chan, char *ext, struct leave_vm_
 {
 #ifdef IMAP_STORAGE
 	int newmsgs, oldmsgs;
-#else
-	char urgdir[PATH_MAX];
 #endif
 	char txtfile[PATH_MAX];
 	char tmptxtfile[PATH_MAX];
@@ -7080,6 +7067,14 @@ static int leave_voicemail(struct ast_channel *chan, char *ext, struct leave_vm_
 		}
 		res = play_record_review(chan, NULL, tmptxtfile, vmu->maxsecs, fmt, 1, vmu, &duration, &sound_duration, NULL, options->record_gain, vms, flag, msg_id, 0);
 
+		/* At this point, either we were instructed to make the message Urgent
+		   by arguments to VoiceMail or during the review process by the person
+		   leaving the message. So we update the directory where we want this
+		   message to go. */
+		if (!strcmp(flag, "Urgent")) {
+			create_dirpath(dir, sizeof(dir), vmu->context, ext, "Urgent");
+		}
+
 		if (txt) {
 			fprintf(txt, "flag=%s\n", flag);
 			if (sound_duration < vmu->minsecs) {
@@ -7160,25 +7155,7 @@ static int leave_voicemail(struct ast_channel *chan, char *ext, struct leave_vm_
 							free_user(recip);
 						}
 					}
-#ifndef IMAP_STORAGE
-					if (!ast_strlen_zero(flag) && !strcmp(flag, "Urgent")) { /* If this is an Urgent message */
-						/* Move the message from INBOX to Urgent folder if this is urgent! */
-						char sfn[PATH_MAX];
-						char dfn[PATH_MAX];
-						int x;
-						/* It's easier just to try to make it than to check for its existence */
-						create_dirpath(urgdir, sizeof(urgdir), vmu->context, ext, "Urgent");
-						x = last_message_index(vmu, urgdir) + 1;
-						make_file(sfn, sizeof(sfn), dir, msgnum);
-						make_file(dfn, sizeof(dfn), urgdir, x);
-						ast_debug(5, "Created an Urgent message, moving file from %s to %s.\n", sfn, dfn);
-						RENAME(dir, msgnum, vmu->mailbox, vmu->context, urgdir, x, sfn, dfn);
-						/* Notification must happen for this new message in Urgent folder, not INBOX */
-						ast_copy_string(fn, dfn, sizeof(fn));
-						pbx_builtin_setvar_helper(chan, "VM_MESSAGEFILE", fn);
-						msgnum = x;
-					}
-#endif
+
 					/* Notification needs to happen after the copy, though. */
 					if (ast_fileexists(fn, NULL, NULL)) {
 #ifdef IMAP_STORAGE
@@ -13298,6 +13275,7 @@ static void *mb_poll_thread(void *data)
 static void mwi_sub_destroy(struct mwi_sub *mwi_sub)
 {
 	ast_free(mwi_sub->uniqueid);
+	ast_free(mwi_sub->mailbox);
 	ast_free(mwi_sub);
 }
 
@@ -13376,35 +13354,12 @@ static int handle_unsubscribe(void *datap)
 
 static int handle_subscribe(void *datap)
 {
-	unsigned int len;
-	struct mwi_sub *mwi_sub;
-	struct mwi_sub_task *p = datap;
-	size_t context_len;
-
-	len = sizeof(*mwi_sub) + 1;
-	if (!ast_strlen_zero(p->mailbox))
-		len += strlen(p->mailbox);
-
-	context_len = strlen(p->context) + 1; /* Allow for seperator */
-	if (!ast_strlen_zero(p->context))
-		len += context_len;
-
-	if (!(mwi_sub = ast_calloc(1, len)))
-		return -1;
-
-	mwi_sub->uniqueid = ast_strdup(p->uniqueid);
-	if (!ast_strlen_zero(p->mailbox))
-		strcpy(mwi_sub->mailbox, p->mailbox);
-
-	if (!ast_strlen_zero(p->context)) {
-		strcat(mwi_sub->mailbox, "@");
-		ast_copy_string(mwi_sub->mailbox, p->context, context_len);
-	}
+	struct mwi_sub *mwi_sub = datap;
 
 	AST_RWLIST_WRLOCK(&mwi_subs);
 	AST_RWLIST_INSERT_TAIL(&mwi_subs, mwi_sub, entry);
 	AST_RWLIST_UNLOCK(&mwi_subs);
-	mwi_sub_task_dtor(p);
+
 	poll_subscribed_mailbox(mwi_sub);
 	return 0;
 }
@@ -13425,29 +13380,39 @@ static void mwi_unsub_event_cb(struct stasis_subscription_change *change)
 
 static void mwi_sub_event_cb(struct stasis_subscription_change *change)
 {
-	struct mwi_sub_task *mwist;
+	struct mwi_sub *mwi_sub;
 	const char *topic;
 	char *context;
 	char *mailbox;
 
-	mwist = ast_calloc(1, (sizeof(*mwist)));
-	if (!mwist) {
+	mwi_sub = ast_calloc(1, sizeof(*mwi_sub));
+	if (!mwi_sub) {
 		return;
 	}
 
 	/* The topic name is prefixed with "mwi:all/" as this is a pool topic */
 	topic = stasis_topic_name(change->topic) + 8;
 	if (separate_mailbox(ast_strdupa(topic), &mailbox, &context)) {
-		ast_free(mwist);
+		mwi_sub_destroy(mwi_sub);
 		return;
 	}
 
-	mwist->mailbox = ast_strdup(mailbox);
-	mwist->context = ast_strdup(context);
-	mwist->uniqueid = ast_strdup(change->uniqueid);
+	/* separate_mailbox() guarantees a non-NULL, non-empty mailbox and context */
+	if (ast_asprintf(&mwi_sub->mailbox, "%s@%s", mailbox, context) < 0) {
+		mwi_sub_destroy(mwi_sub);
+		return;
+	}
 
-	if (ast_taskprocessor_push(mwi_subscription_tps, handle_subscribe, mwist) < 0) {
-		mwi_sub_task_dtor(mwist);
+	/* The stasis subscription uniqueid will never be NULL */
+	mwi_sub->uniqueid = ast_strdup(change->uniqueid);
+	if (!mwi_sub->uniqueid) {
+		mwi_sub_destroy(mwi_sub);
+		return;
+	}
+
+	if (ast_taskprocessor_push(mwi_subscription_tps, handle_subscribe, mwi_sub) < 0) {
+		mwi_sub_destroy(mwi_sub);
+		return;
 	}
 }
 

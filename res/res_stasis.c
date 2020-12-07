@@ -427,6 +427,33 @@ struct stasis_app_bridge_channel_wrapper {
 	);
 };
 
+/*! AO2 comparison function for bridges moh container */
+static int bridges_channel_compare(void *obj, void *arg, int flags)
+{
+	const struct stasis_app_bridge_channel_wrapper *object_left = obj;
+	const struct stasis_app_bridge_channel_wrapper *object_right = arg;
+	const char *right_key = arg;
+	int cmp;
+
+	switch (flags & OBJ_SEARCH_MASK) {
+	case OBJ_SEARCH_OBJECT:
+			right_key = object_right->bridge_id;
+	case OBJ_SEARCH_KEY:
+			cmp = strcmp(object_left->bridge_id, right_key);
+			break;
+	case OBJ_SEARCH_PARTIAL_KEY:
+			cmp = strncmp(object_left->bridge_id, right_key, strlen(right_key));
+			break;
+	default:
+			cmp = 0;
+			break;
+	}
+	if (cmp) {
+		return 0;
+	}
+	return CMP_MATCH;
+}
+
 static void stasis_app_bridge_channel_wrapper_destructor(void *obj)
 {
 	struct stasis_app_bridge_channel_wrapper *wrapper = obj;
@@ -775,6 +802,7 @@ struct ast_bridge *stasis_app_bridge_create(const char *type, const char *name, 
 	int flags = AST_BRIDGE_FLAG_MERGE_INHIBIT_FROM | AST_BRIDGE_FLAG_MERGE_INHIBIT_TO
 		| AST_BRIDGE_FLAG_SWAP_INHIBIT_FROM | AST_BRIDGE_FLAG_SWAP_INHIBIT_TO
 		| AST_BRIDGE_FLAG_TRANSFER_BRIDGE_ONLY;
+	enum ast_bridge_video_mode_type video_mode = AST_BRIDGE_VIDEO_MODE_TALKER_SRC;
 
 	while ((requested_type = strsep(&requested_types, ","))) {
 		requested_type = ast_strip(requested_type);
@@ -787,6 +815,8 @@ struct ast_bridge *stasis_app_bridge_create(const char *type, const char *name, 
 		} else if (!strcmp(requested_type, "dtmf_events") ||
 			!strcmp(requested_type, "proxy_media")) {
 			capabilities &= ~AST_BRIDGE_CAPABILITY_NATIVE;
+		} else if (!strcmp(requested_type, "video_single")) {
+			video_mode = AST_BRIDGE_VIDEO_MODE_SINGLE_SRC;
 		}
 	}
 
@@ -797,14 +827,14 @@ struct ast_bridge *stasis_app_bridge_create(const char *type, const char *name, 
 		return NULL;
 	}
 
-	bridge = bridge_stasis_new(capabilities, flags, name, id);
+	bridge = bridge_stasis_new(capabilities, flags, name, id, video_mode);
 	if (bridge) {
-		ast_bridge_set_talker_src_video_mode(bridge);
 		if (!ao2_link(app_bridges, bridge)) {
 			ast_bridge_destroy(bridge, 0);
 			bridge = NULL;
 		}
 	}
+
 	return bridge;
 }
 
@@ -2317,7 +2347,7 @@ static int load_module(void)
 		BRIDGES_NUM_BUCKETS, bridges_hash, NULL, bridges_compare);
 	app_bridges_moh = ao2_container_alloc_hash(
 		AO2_ALLOC_OPT_LOCK_MUTEX, 0,
-		37, bridges_channel_hash_fn, NULL, NULL);
+		37, bridges_channel_hash_fn, NULL, bridges_channel_compare);
 	app_bridges_playback = ao2_container_alloc_hash(
 		AO2_ALLOC_OPT_LOCK_MUTEX, AO2_CONTAINER_ALLOC_OPT_DUPS_REJECT,
 		37, bridges_channel_hash_fn, bridges_channel_sort_fn, NULL);

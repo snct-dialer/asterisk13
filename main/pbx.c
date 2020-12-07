@@ -3108,10 +3108,15 @@ static int internal_extension_state_extended(struct ast_channel *c, const char *
 	}
 
 	if (e->exten[0] == '_') {
-		/* Create this hint on-the-fly */
+		/* Create this hint on-the-fly, we explicitly lock hints here to ensure the
+		 * same locking order as if this were done through configuration file - that is
+		 * hints is locked first and then (if needed) contexts is locked
+		 */
+		ao2_lock(hints);
 		ast_add_extension(e->parent->name, 0, exten, e->priority, e->label,
 			e->matchcid ? e->cidmatch : NULL, e->app, ast_strdup(e->data), ast_free_ptr,
 			e->registrar);
+		ao2_unlock(hints);
 		if (!(e = ast_hint_extension(c, context, exten))) {
 			/* Improbable, but not impossible */
 			return -1;
@@ -3188,9 +3193,11 @@ int ast_hint_presence_state(struct ast_channel *c, const char *context, const ch
 
 	if (e->exten[0] == '_') {
 		/* Create this hint on-the-fly */
+		ao2_lock(hints);
 		ast_add_extension(e->parent->name, 0, exten, e->priority, e->label,
 			e->matchcid ? e->cidmatch : NULL, e->app, ast_strdup(e->data), ast_free_ptr,
 			e->registrar);
+		ao2_unlock(hints);
 		if (!(e = ast_hint_extension(c, context, exten))) {
 			/* Improbable, but not impossible */
 			return -1;
@@ -3720,9 +3727,11 @@ static int extension_state_add_destroy(const char *context, const char *exten,
 	 * individual extension, because the pattern will no longer match first.
 	 */
 	if (e->exten[0] == '_') {
+		ao2_lock(hints);
 		ast_add_extension(e->parent->name, 0, exten, e->priority, e->label,
 			e->matchcid ? e->cidmatch : NULL, e->app, ast_strdup(e->data), ast_free_ptr,
 			e->registrar);
+		ao2_unlock(hints);
 		e = ast_hint_extension(NULL, context, exten);
 		if (!e || e->exten[0] == '_') {
 			return -1;
@@ -7252,6 +7261,10 @@ static int ast_add_extension2_lockopt(struct ast_context *con,
 	if (ast_strlen_zero(extension)) {
 		ast_log(LOG_ERROR,"You have to be kidding-- add exten '' to context %s? Figure out a name and call me back. Action ignored.\n",
 				con->name);
+		/* We always need to deallocate 'data' on failure */
+		if (datad) {
+			datad(data);
+		}
 		return -1;
 	}
 
@@ -7304,8 +7317,14 @@ static int ast_add_extension2_lockopt(struct ast_context *con,
 	}
 
 	/* Be optimistic:  Build the extension structure first */
-	if (!(tmp = ast_calloc(1, length)))
+	tmp = ast_calloc(1, length);
+	if (!tmp) {
+		/* We always need to deallocate 'data' on failure */
+		if (datad) {
+			datad(data);
+		}
 		return -1;
+	}
 
 	if (ast_strlen_zero(label)) /* let's turn empty labels to a null ptr */
 		label = 0;

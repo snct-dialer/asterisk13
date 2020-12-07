@@ -1,7 +1,723 @@
-2020-07-16 15:57 +0000  Asterisk Development Team <asteriskteam@digium.com>
+2020-11-19 12:31 +0000  Asterisk Development Team <asteriskteam@digium.com>
 
-	* asterisk 13.35.0 Released.
+	* asterisk 13.38.0 Released.
 
+2020-11-12 11:55 +0000  Asterisk Development Team <asteriskteam@digium.com>
+
+	* asterisk 13.38.0-rc1 Released.
+
+2020-11-12 05:45 +0000 [c7d3c071dd]  Asterisk Development Team <asteriskteam@digium.com>
+
+	* Update CHANGES and UPGRADE.txt for 13.38.0
+2020-10-19 17:21 +0000 [b87527b000]  Kevin Harwell <kharwell@digium.com>
+
+	* AST-2020-001 - res_pjsip: Return dialog locked and referenced
+
+	  pjproject returns the dialog locked and with a reference. However,
+	  in Asterisk the method that handles this decrements the reference
+	  and removes the lock prior to returning. This makes it possible,
+	  under some circumstances, for another thread to free said dialog
+	  before the thread that created it attempts to use it again. Of
+	  course when the thread that created it tries to use a freed dialog
+	  a crash can occur.
+
+	  This patch makes it so Asterisk now returns the newly created
+	  dialog both locked, and with an added reference. This allows the
+	  caller to de-reference, and unlock the dialog when it is safe to
+	  do so.
+
+	  In the case of a new SIP Invite the lock, and reference are now
+	  held for the entirety of the new invite handling process.
+	  Otherwise it's possible for the dialog, or its dependent objects,
+	  like the transaction, to disappear. For example if there is a TCP
+	  transport error.
+
+	  ASTERISK-29057 #close
+
+	  Change-Id: I5ef645a47829596f402cf383dc02c629c618969e
+
+2020-11-02 10:29 +0000 [01b7ac0d59]  Ben Ford <bford@digium.com>
+
+	* AST-2020-002 - res_pjsip: Stop sending INVITEs after challenge limit.
+
+	  If Asterisk sends out an INVITE and receives a challenge with a
+	  different nonce value each time, it will continuously send out INVITEs,
+	  even if the call is hung up. The endpoint must be configured for
+	  outbound authentication for this to occur. A limit has been set on
+	  outbound INVITEs so that, once reached, Asterisk will stop sending
+	  INVITEs and the transaction will terminate.
+
+	  ASTERISK-29013
+
+	  Change-Id: I2d001ca745b00ca8aa12030f2240cd72363b46f7
+
+2020-10-23 10:26 +0000 [a581fcfe0c]  Alexander Traud <pabstraud@compuserve.com>
+
+	* chan_sip: On authentication, pick MD5 for sure.
+
+	  RFC 8760 added new digest-access-authentication schemes. Testing
+	  revealed that chan_sip does not pick MD5 if several schemes are offered
+	  by the User Agent Server (UAS). This change does not implement any of
+	  the new schemes like SHA-256. This change makes sure, MD5 is picked so
+	  UAS with SHA-2 enabled, like the service www.linphone.org/freesip, can
+	  still be used. This should have worked since day one because SIP/2.0
+	  already envisioned several schemes (see RFC 3261 and its augmented BNF
+	  for 'algorithm' which includes 'token' as third alternative; note: if
+	  'algorithm' was not present, MD5 is still assumed even in RFC 7616).
+
+	  Change-Id: I61ca0b1f74b5ec2b5f3062c2d661cafeaf597fcd
+
+2020-06-04 09:23 +0000 [bee2e3e720]  Walter Doekes <walter+asterisk@wjd.nu>
+
+	* main/say: Work around gcc 9 format-truncation false positive
+
+	  Version: gcc (Ubuntu 9.3.0-10ubuntu2) 9.3.0
+	  Warning:
+	    say.c:2371:24: error: ‘%d’ directive output may be truncated writing
+	      between 1 and 11 bytes into a region of size 10
+	      [-Werror=format-truncation=]
+	    2371 |     snprintf(buf, 10, "%d", num);
+	    say.c:2371:23: note: directive argument in the range [-2147483648, 9]
+
+	  That's not possible though, as the if() starts out checking for (num < 0),
+	  making this Warning a false positive.
+
+	  (Also replaced some else<TAB>if with else<SP>if while in the vicinity.)
+
+	  Change-Id: Ic7a70120188c9aa525a6d70289385bfce878438a
+
+2020-10-19 15:31 +0000 [ca8f0b1d21]  Kevin Harwell <kharwell@digium.com>
+
+	* res_pjsip, res_pjsip_session: initialize local variables
+
+	  This patch initializes a couple of local variables to some default values.
+	  Interestingly, in the 'pj_status_t dlg_status' case the value not being
+	  initialized caused memory to grow, and not be recovered, in the off nominal
+	  path (at least on my machine).
+
+	  Change-Id: I22ee65e1e1bff8efacea8a167c6c8428898523f7
+
+2020-10-23 09:55 +0000 [5bc784130e]  Alexander Traud <pabstraud@compuserve.com>
+
+	* install_prereq: Add GMime 3.0.
+
+	  Ubuntu 20.10 does not come with GMime 2.6. Ubuntu 16.04 LTS does not
+	  come with GMime 3.0. aptitude ignores any missing package. Therefore,
+	  it installs the correct package(s). However, in Ubuntu 18.04 LTS and
+	  Ubuntu 20.04 LTS, both versions are installed alongside although only
+	  one is really needed.
+
+	  Change-Id: Ic58aa9f2e131d94671f286f17dbd61e1ccbabcb7
+
+2020-10-23 09:49 +0000 [55f83b01f8]  Alexander Traud <pabstraud@compuserve.com>
+
+	* BuildSystem: Enable Lua 5.4.
+
+	  Note to maintainers: Lua 5.4, Lua 5.3, and Lua 5.2 have not been tested
+	  at runtime with pbx_lua. Until then, use the lowest available version
+	  of Lua, if you enabled the module pbx_lua at all.
+
+	  Change-Id: Ie5270448b11fcb4e2a53d899e4fe7fea793ce7e0
+
+2020-10-19 13:04 +0000 [e2bbb93de2]  Asterisk Development Team <asteriskteam@digium.com>
+
+	* Update CHANGES and UPGRADE.txt for 13.37.0
+2020-10-12 05:30 +0000 [849ace4af9]  Joshua C. Colp <jcolp@sangoma.com>
+
+	* asterisk: Add verbose message stating support status.
+
+	  This change outputs a message at startup and when a remote
+	  console is connected stating that this branch is no longer
+	  receiving bug fixes and to consult the Asterisk Versions wiki
+	  page for status information.
+
+	  Change-Id: I6b8a77d33e338a3e52dd65f998d8a07e4d16aa2e
+
+2020-10-05 10:44 +0000 [d590f63163]  Jean Aunis <jean.aunis@prescom.fr>
+
+	* resource_endpoints.c: memory leak when providing a 404 response
+
+	  When handling a send_message request to a non-existing endpoint, the response's
+	  body is overriden and not properly freed.
+
+	  ASTERISK-29108
+
+	  Change-Id: Ie1d3d70065f80793445b60f5e4a7eb31b4b9c5c8
+
+2020-09-29 13:04 +0000 [715235202d]  Sean Bright <sean.bright@gmail.com>
+
+	* pbx.c: On error, ast_add_extension2_lockopt should always free 'data'
+
+	  In the event that the desired extension already exists,
+	  ast_add_extension2_lockopt() will free the 'data' it is passed before
+	  returning an error, so we should not be freeing it ourselves.
+
+	  Additionally, there were two places where ast_add_extension2_lockopt()
+	  could return an error without also freeing the 'data' pointer, so we
+	  add that.
+
+	  ASTERISK-29097 #close
+
+	  Change-Id: I904707aae55169feda050a5ed7c6793b53fe6eae
+
+2020-09-29 19:57 +0000 [48b64326c6]  Sean Bright <sean.bright@gmail.com>
+
+	* app_voicemail.c: Document VMSayName interruption behavior
+
+	  ASTERISK-26424 #close
+
+	  Change-Id: I797ad0ed302d0b3d2c90543eff5b7207ed08ecf0
+
+2020-09-22 22:39 +0000 [e60c7731be]  Holger Hans Peter Freyther <holger@moiji-mobile.com>
+
+	* res_pjsip_sdp_rtp: Fix accidentally native bridging calls
+
+	  Stop advertising RFC2833 support on the rtp_engine when DTMF mode is
+	  auto but no tel_event was found inside SDP file.
+
+	  On an incoming call create_rtp will be called and when session->dtmf is
+	  set to AST_SIP_DTMF_AUTO, the AST_RTP_PROPERTY_DTMF will be set without
+	  looking at the SDP file.
+
+	  Once get_codecs gets called we move the DTMF mode from RFC2833 to INBAND
+	  but continued to advertise RFC2833 support.
+
+	  This meant the native_rtp bridge would falsely consider the two channels
+	  as compatible. In addition to changing the DTMF mode we now set or
+	  remove the AST_RTP_PROPERTY_DTMF.
+
+	  The property is checked in ast_rtp_dtmf_compatible and called by
+	  native_rtp_bridge_compatible.
+
+	  ASTERISK-29051 #close
+
+	  Change-Id: I1e0c1e324598a437932c0b7836bcb626aba8e287
+
+2020-09-24 09:54 +0000 [279c202da6]  Torrey Searle <tsearle@voxbone.com>
+
+	* res_pjsip_diversion: fix double 181
+
+	  Arming response to both AST_SIP_SESSION_BEFORE_REDIRECTING and
+	  AST_SIP_SESSION_BEFORE_MEDIA causes 302 to to be handled twice,
+	  resulting in to 181 being generated.
+
+	  Change-Id: I866e5461564644ffb8a5e12b6f1330b50a7b63ab
+
+2020-09-23 15:20 +0000 [8d28d964d1]  Sean Bright <sean.bright@gmail.com>
+
+	* dsp.c: Update calls to ast_format_cmp to check result properly
+
+	  ASTERISK-28311 #close
+
+	  Change-Id: Ib1ce8fc1a8752751f5bf3615c59245532dfd9aa2
+
+2020-09-18 15:02 +0000 [dde85bae7f]  Sean Bright <sean.bright@gmail.com>
+
+	* res_musiconhold: Start playlist after initial announcement
+
+	  Only track our sample offset if we are playing a non-announcement file,
+	  otherwise we will skip that number of samples when we start playing the
+	  first MoH file.
+
+	  ASTERISK-24329 #close
+
+	  Change-Id: Ib6b3c84fcaa1063889ab38ba7e7fc50050a3ccfc
+
+2020-09-16 08:01 +0000 [9a62d1fd2a]  Michal Hajek <michal.hajek@daktela.com>
+
+	* res_stasis.c: Add compare function for bridges moh container
+
+	  Sometimes not play MOH on bridge.
+
+	  ASTERISK-29081
+	  Reported-by: Michal Hajek <michal.hajek@daktela.com>
+
+	  Change-Id: I760c73e0c9be1d340303b5d1c18a00c4759e8232
+
+2020-09-18 08:09 +0000 [59492c475c]  Sean Bright <sean.bright@gmail.com>
+
+	* func_curl.c: Prevent crash when using CURLOPT(httpheader)
+
+	  Because we use shared thread-local cURL instances, we need to ensure
+	  that the state of the cURL instance is correct before each invocation.
+
+	  In the case of custom headers, we were not resetting cURL's internal
+	  HTTP header pointer which could result in a crash if subsequent
+	  requests do not configure custom headers.
+
+	  ASTERISK-29085 #close
+
+	  Change-Id: I8b4ab34038156dfba613030a45f10e932d2e992d
+
+2020-08-13 03:34 +0000 [9decb33531]  Torrey Searle <tsearle@voxbone.com>
+
+	* res_pjsip_diversion: implement support for History-Info
+
+	  Implemention of History-Info capable of interworking with Diversion
+	  Header following RFC7544
+
+	  ASTERISK-29027 #close
+
+	  Change-Id: I2296369582d4b295c5ea1e60bec391dd1d318fa6
+	  (cherry picked from commit 5a12463c0709513514abd42a48039d62ca9a6155)
+
+2020-09-14 13:23 +0000 [9cd1103030]  Sean Bright <sean.bright@gmail.com>
+
+	* format_cap: Perform codec lookups by pointer instead of name
+
+	  ASTERISK-28416 #close
+
+	  Change-Id: I069420875ebdbcaada52d92599a5f7de3cb2cdf4
+
+2020-08-31 07:21 +0000 [a2ed7f2eb4]  Sungtae Kim <pchero21@gmail.com>
+
+	* realtime: Increased reg_server character size
+
+	  Currently, the ps_contacts table's reg_server column in realtime database type is varchar(20).
+	  This is fine for normal cases, but if the hostname is longer than 20, it returns error and then
+	  failed to register the contact address of the peer.
+
+	  Normally, 20 characters limitation for the hostname is fine, but with the cloud env.
+	  So, increased the size to 255.
+
+	  ASTERISK-29056
+
+	  Change-Id: Iac52c8c35030303cfa551bb39f410b33bffc507d
+
+2020-08-30 15:42 +0000 [022284f8af]  Sungtae Kim <pchero21@gmail.com>
+
+	* res_stasis.c: Added video_single option for bridge creation
+
+	  Currently, it was not possible to create bridge with video_mode single.
+	  This made hard to put the bridge in a vidoe_single mode.
+	  So, added video_single option for Bridge creation using the ARI.
+	  This allows create a bridge with video_mode single.
+
+	  ASTERISK-29055
+
+	  Change-Id: I43e720e5c83fc75fafe10fe22808ae7f055da2ae
+
+2020-08-31 11:14 +0000 [514b1d6b49]  Ben Ford <bford@digium.com>
+
+	* Bridging: Use a ref to bridge_channel's channel to prevent crash.
+
+	  There's a race condition with bridging where a bridge can be torn down
+	  causing the bridge_channel's ast_channel to become NULL when it's still
+	  needed. This particular case happened with attended transfers, but the
+	  crash occurred when trying to publish a stasis message. Now, the
+	  bridge_channel is locked, a ref to the ast_channel is obtained, and that
+	  ref is passed down the chain.
+
+	  Change-Id: Ic48715c0c041615d17d286790ae3e8c61bb28814
+
+2020-09-09 14:11 +0000  Asterisk Development Team <asteriskteam@digium.com>
+
+	* asterisk 13.37.0-rc1 Released.
+
+2020-09-09 09:00 +0000 [8ccae31f5d]  Asterisk Development Team <asteriskteam@digium.com>
+
+	* Update CHANGES and UPGRADE.txt for 13.37.0
+2020-09-01 08:43 +0000 [d649ab4a30]  Patrick Verzele <patrick@verzele.be>
+
+	* res_pjsip_session: Deferred re-INVITE without SDP send a=sendrecv instead of a=sendonly
+
+	  Building on ASTERISK-25854. When the device requests hold by sending SDP with attribute recvonly, asterisk places the session in sendonly mode. When the device later requests to resume the call by using a re-INVITE excluding SDP, asterisk needs to change the sendonly mode to sendrecv again.
+
+	  Change-Id: I60341ce3d87f95869f3bc6dc358bd3e8286477a6
+
+2020-08-26 04:58 +0000 [0064aa0107]  Kfir Itzhak <mastertheknife@gmail.com>
+
+	* app_queue: Fix leave-empty not recording a call as abandoned
+
+	  This fixes a bug introduced mistakenly in ASTERISK-25665:
+	  If leave-empty is enabled, a call may sometimes be removed from
+	  a queue without recording it as abandoned.
+	  This causes Asterisk to not generate an abandon event for that
+	  call, and for the queue abandoned counter to be incorrect.
+
+	  ASTERISK-29043 #close
+
+	  Change-Id: I1a71b81df78adff59af587f1d8483cf57df430c7
+
+2020-08-28 09:34 +0000 [bc615ee4c4]  George Joseph <gjoseph@digium.com>
+
+	* ast_coredumper: Fix issues with naming
+
+	  If you run ast_coredumper --tarball-coredumps in the same directory
+	  as the actual coredump, tar can fail because the link to the
+	  actual coredump becomes recursive.  The resulting tarball will
+	  have everything _except_ the coredump (which is usually what
+	  you need)
+
+	  There's also an issue that the directory name in the tarball
+	  is the same as the coredump so if you extract the tarball the
+	  directory it creates will overwrite the coredump.
+
+	  So:
+
+	   * Made the link to the coredump use the absolute path to the
+	     file instead of a relative one.  This prevents the recursive
+	     link and allows tar to add the coredump.
+
+	   * The tarballed directory is now named <coredump>.output instead
+	     of just <coredump> so if you expand the tarball it won't
+	     overwrite the coredump.
+
+	  Change-Id: I8b3eeb26e09a577c702ff966924bb0a2f9a759ea
+
+2020-08-28 04:29 +0000 [dc6d3a746c]  Joshua C. Colp <jcolp@sangoma.com>
+
+	* parking: Copy parker UUID as well.
+
+	  When fixing issues uncovered by GCC10 a copy of the parker UUID
+	  was removed accidentally. This change restores it so that the
+	  subscription has the data it needs.
+
+	  ASTERISK-29042
+
+	  Change-Id: I7d396a14ea648bd26d3c363dd78e78bd386b544a
+
+2016-05-03 11:11 +0000 [c111777756]  Tzafrir Cohen <tzafrir@debian.org>
+
+	* followme: allow disabling callee prompt
+
+	  Add the option 'enable_callee_prompt' to followme.conf. Enabled by
+	  default. If disabled, a callee is not prompted to accept or reject
+	  the forwarded call.
+
+	  ASTERISK-29010 #close
+
+	  Change-Id: Ic15a2bac4f16d0fce7a1b5e7b375f9bafee37aa4
+	  Signed-off-by: Tzafrir Cohen <tzafrir.cohen@xorcom.com>
+
+2020-08-26 08:55 +0000 [4cc8d29fd3]  Sean Bright <sean.bright@gmail.com>
+
+	* app_voicemail: Fix pollmailboxes
+
+	  The name of the voicemail context was overwriting the name of the
+	  subscribed mailbox. Fix by simplifying how we create the MWI
+	  subscription.
+
+	  ASTERISK-29029 #close
+
+	  Change-Id: Ie8a7db6a0b68f3995b0846bbb733a21909ba44e5
+
+2020-08-26 10:43 +0000 [384f2638b2]  Alexander Traud <pabstraud@compuserve.com>
+
+	* sip_nat_settings: Update script for latest Linux.
+
+	  With the latest Linux, 'ifconfig' is not installed on default anymore.
+	  Furthermore, the output of the current net-tools 'ifconfig' changed.
+	  Therefore, parsing failed. This update uses 'ip addr show' instead.
+	  Finally, the service for the external IP changed.
+
+	  Change-Id: I9b1a7c3f457e3553b50a3e9a55524e40d70245a0
+
+2020-08-26 10:19 +0000 [8055807be2]  Alexander Traud <pabstraud@compuserve.com>
+
+	* samples: Fix keep_alive_interval default in pjsip.conf.
+
+	  Since ASTERISK_27978 the default is not off but 90 seconds. That change
+	  happened because ASTERISK_27347 disabled the keep-alives in the bundled
+	  PJProject and Asterisk should behave the same as before.
+
+	  Change-Id: Ie63dc558ade6a5a2b969c30a4bd492d63730dc46
+
+2020-08-24 16:26 +0000 [bf139ff519]  Kevin Harwell <kharwell@digium.com>
+
+	* chan_pjsip: disallow PJSIP_SEND_SESSION_REFRESH pre-answer execution
+
+	  This patch makes it so if the PJSIP_SEND_SESSION_REFRESH dialplan function
+	  is called on a channel prior to answering a warning is issued and the
+	  function returns unsuccessful.
+
+	  ASTERISK-28878 #close
+
+	  Change-Id: I053f767d10cf3b2b898fa9e3e7c35ff07e23c9bb
+
+2020-08-27 05:31 +0000 [e519d28fe0]  Joshua C. Colp <jcolp@sangoma.com>
+
+	* pbx: Fix hints deadlock between reload and ExtensionState.
+
+	  When the ExtensionState AMI action is executed on a pattern matched
+	  hint it can end up adding a new hint if one does not already exist.
+	  This results in a locking order of contexts -> hints -> contexts.
+
+	  If at the same time a reload is occurring and adding its own hint
+	  it will have a locking order of hints -> contexts.
+
+	  This results in a deadlock as one thread wants a lock on contexts
+	  that the other has, and the other thread wants a lock on hints
+	  that the other has.
+
+	  This change enforces a hints -> contexts locking order by explicitly
+	  locking hints in the places where a hint is added when queried for.
+	  This matches the order seen through normal adding of hints.
+
+	  ASTERISK-29046
+
+	  Change-Id: I49f027f4aab5d2d50855ae937bcf5e2fd8bfc504
+
+2020-08-21 16:53 +0000 [fd49b4b43c]  Nickolay Shmyrev <nshmyrev@alphacephei.com>
+
+	* res_speech: Bump reference on format object
+
+	  Properly bump reference on format object to avoid memory corruption on double free
+
+	  ASTERISK-29040 #close
+
+	  Change-Id: Ic5a7faabfe2ef965ddb024186e1de7ca4542e2a3
+
+2020-07-22 03:45 +0000 [efb682c8f2]  Torrey Searle <tsearle@voxbone.com>
+
+	* res_pjsip_diversion: handle 181
+
+	  Adapt the response handler so it also called when 181 is received.
+	  In the case 181 is received, also generate the 181 response.
+
+	  ASTERISK-29001 #close
+
+	  Change-Id: I73cfee46a8ca85371280ebdb38674f8fde7510df
+
+2020-08-21 09:17 +0000 [273f819dfe]  Sean Bright <sean.bright@gmail.com>
+
+	* app_voicemail: Process urgent messages with mailcmd
+
+	  Rather than putting messages into INBOX and then moving them to Urgent
+	  later, put them directly in to the Urgent folder. This prevents
+	  mailcmd from being skipped.
+
+	  ASTERISK-27273 #close
+
+	  Change-Id: I49934e093290d308506ab8d45a40ef705c5ae4f5
+
+2020-08-18 04:36 +0000 [02dee3986a]  Joshua C. Colp <jcolp@sangoma.com>
+
+	* res_pjsip_session: Don't aggressively terminate on failed re-INVITE.
+
+	  Per the RFC when an outgoing re-INVITE is done we should
+	  only terminate the dialog if a 481 or 408 is received.
+
+	  ASTERISK-29033
+
+	  Change-Id: I6c3ff513aa41005d02de0396ba820083e9b18503
+
+2020-08-20 08:57 +0000 [c7df06a077]  George Joseph <gjoseph@digium.com>
+
+	* scope_trace: Updated macro stubs to match other branches
+
+	  Although scope tracing isn't actually implemented in this branch,
+	  macro stubs had been added to allow code that used scope tracing
+	  to be cherry-picked to this branch without modification.
+
+	  To match the other branches, the following changes were made
+	  to the stubs...
+
+	  The SCOPE_ENTER and SCOPE_EXIT* macros now print debug messages
+	  at the same level as the scope level.  This allows the same
+	  messages to be printed to the debug log when AST_DEVMODE
+	  isn't enabled.
+
+	  Also added a few variants of the SCOPE_EXIT macros that will
+	  also call ast_log instead of ast_debug to make it easier to
+	  use scope tracing and still print error messages.
+
+	  Change-Id: Ifc281793a5b91c84a4f1633db9d07006d31585ed
+
+2020-08-19 12:29 +0000 [179530558d]  Sean Bright <sean.bright@gmail.com>
+
+	* bridge_channel: Ensure text messages are zero terminated
+
+	  T.140 data in RTP is not zero terminated, so when we are queuing a text
+	  frame on a bridge we need to ensure that we are passing a zero
+	  terminated string.
+
+	  ASTERISK-28974 #close
+
+	  Change-Id: Ic10057387ce30b2094613ea67e3ae8c5c431dda3
+
+2020-08-20 10:03 +0000  Asterisk Development Team <asteriskteam@digium.com>
+
+	* asterisk 13.36.0-rc1 Released.
+
+2020-02-18 06:30 +0000 [56f446482b]  Dennis Buteyn <dennis.buteyn@xorcom.com>
+
+	* chan_sip: Clear ToHost property on peer when changing to dynamic host
+
+	  The ToHost parameter was not cleared when a peer's host value was
+	  changed to dynamic. This causes invites to be sent to the original host.
+
+	  ASTERISK-29011 #close
+
+	  Change-Id: I9678d512741f71baca8f131a65b7523020b07d5c
+
+2020-07-10 18:14 +0000 [53f9bbdc2d]  sungtae kim <sungtae@messagebird.com>
+
+	* stasis_bridge.c: Fixed wrong video_mode shown
+
+	  Currently, if the bridge has created by the ARI, the video_mode
+	  parameter was
+	  not shown in the BridgeCreated event correctly.
+
+	  Fixed it and added video_mode shown in the 'bridge show <bridge id>'
+	  cli.
+
+	  ASTERISK-28987
+
+	  Change-Id: I8c205126724e34c2bdab9380f523eb62478e4295
+
+2020-08-06 09:58 +0000 [7379a54424]  Sean Bright <sean.bright@gmail.com>
+
+	* res_musiconhold.c: Prevent crash with realtime MoH
+
+	  The MoH class internal file vector is potentially being manipulated by
+	  multiple threads at the same time without sufficient locking. Switch to
+	  a reference counted list and operate on copies where necessary.
+
+	  ASTERISK-28927 #close
+
+	  Change-Id: I479c5dcf88db670956e8cac177b5826c986b0217
+
+2020-08-04 10:51 +0000 [46fb9fb663]  Sean Bright <sean.bright@gmail.com>
+
+	* vector.h: Fix implementation of AST_VECTOR_COMPACT() for empty vectors
+
+	  The assumed behavior of realloc() - that it was effectively a free() if
+	  its second argument was 0 - is Linux specific behavior and is not
+	  guaranteed by either POSIX or the C specification.
+
+	  Instead, if we want to resize a vector to 0, do it explicitly.
+
+	  Change-Id: Ife31d4b510ebab41cb5477fdc7ea4e3138ca8b4f
+
+2020-06-30 10:40 +0000 [dd739f8a08]  Michael Neuhauser <mike@firmix.at>
+
+	* pjproject: clone sdp to protect against (nat) modifications
+
+	  PJSIP, UDP transport with external_media_address and session timers
+	  enabled. Connected to SIP server that is not in local net. Asterisk
+	  initiated the connection and is refreshing the session after 150s
+	  (timeout 300s). The 2nd refresh-INVITE triggered by the pjsip timer has
+	  a malformed IP address in its SDP (garbage string). This only happens
+	  when the SDP is modified by the nat-code to replace the local IP address
+	  with the configured external_media_address.
+	  Analysis: the code to modify the SDP (in
+	  res_pjsip_session.c:session_outgoing_nat_hook() and also (redundantly?)
+	  in res_pjsip_sdp_rtp.c:change_outgoing_sdp_stream_media_address()) uses
+	  the tdata->pool to allocate the replacement string. But the same
+	  pjmedia_sdp_stream that was modified for the 1st refresh-INVITE is also
+	  used for the 2nd refresh-INVITE (because it is stored in pjmedia's
+	  pjmedia_sdp_neg structure). The problem is, that at that moment, the
+	  tdata->pool that holds the stringified external_media_address from the
+	  1. refresh-INVITE has long been reused for something else.
+	  Fix by Sauw Ming of pjproject (see
+	  https://github.com/pjsip/pjproject/pull/2476): the local, potentially
+	  modified pjmedia_sdp_stream is cloned in
+	  pjproject/source/pjsip/src/pjmedia/sip_neg.c:process_answer() and the
+	  clone is stored, thereby detaching from the tdata->pool (which is only
+	  released *after* process_answer())
+
+	  ASTERISK-28973
+	  Reported-by: Michael Neuhauser
+
+	  Change-Id: I272ac22436076596e06aa51b9fa23fd1c7734a0e
+
+2020-07-22 04:41 +0000 [5c0d247d69]  Joshua C. Colp <jcolp@sangoma.com>
+
+	* res_pjsip_registrar: Don't specify an expiration for static contacts.
+
+	  Statically configured contacts on an AOR don't have an expiration
+	  time so when adding them to the resulting 200 OK if an endpoint
+	  registers ensure they are marked as such.
+
+	  ASTERISK-28995
+
+	  Change-Id: I9f0e45eb2ccdedc9a0df5358634a19ccab0ad596
+
+2020-07-13 15:06 +0000 [718efe9365]  Sean Bright <sean.bright@gmail.com>
+
+	* utf8.c: Add UTF-8 validation and utility functions
+
+	  There are various places in Asterisk - specifically in regards to
+	  database integration - where having some kind of UTF-8 validation would
+	  be beneficial. This patch adds:
+
+	  * Functions to validate that a given string contains only valid UTF-8
+	    sequences.
+
+	  * A function to copy a string (similar to ast_copy_string) stopping when
+	    an invalid UTF-8 sequence is encountered.
+
+	  * A UTF-8 validator that allows for progressive validation.
+
+	  All of this is based on the excellent UTF-8 decoder by Björn Höhrmann.
+	  More information is available here:
+
+	      https://bjoern.hoehrmann.de/utf-8/decoder/dfa/
+
+	  The API was written in such a way that should allow us to replace the
+	  implementation later should we determine that we need something more
+	  comprehensive.
+
+	  Change-Id: I3555d787a79e7c780a7800cd26e0b5056368abf9
+
+2020-07-20 13:17 +0000 [4fec6da25b]  Sean Bright <sean.bright@gmail.com>
+
+	* vector.h: Add AST_VECTOR_SORT()
+
+	  Allows a vector to be sorted in-place, rather than only during
+	  insertion.
+
+	  Change-Id: I22cba9ddf556a7e44dacc53c4431bd81dd2fa780
+
+2020-07-16 08:41 +0000 [f6afac1b37]  George Joseph <gjoseph@digium.com>
+
+	* CI: Force publishAsteriskDocs to use python2
+
+	  Change-Id: I7d951e75ad2d472fa096647dfb55670b11105e23
+
+2020-07-13 15:42 +0000 [ff90e00677]  Sean Bright <sean.bright@gmail.com>
+
+	* acl.c: Coerce a NULL pointer into the empty string
+
+	  If an ACL is misconfigured in the realtime database (for instance, the
+	  "rule" is blank) and Asterisk attempts to read the ACL, Asterisk will
+	  crash.
+
+	  ASTERISK-28978 #close
+
+	  Change-Id: Ic1536c4df856231bfd2da00128f7822224d77610
+
+2020-07-13 04:41 +0000 [bcdc3ec645]  Joshua C. Colp <jcolp@sangoma.com>
+
+	* pjsip: Include timer patch to prevent cancelling timer 0.
+
+	  I noticed this while looking at another issue and brought
+	  it up with Teluu. It was possible for an uninitialized timer
+	  to be cancelled, resulting in the invalid timer id of 0
+	  being placed into the timer heap causing issues.
+
+	  This change is a backport from the pjproject repository
+	  preventing this from happening.
+
+	  Change-Id: I1ba318b1f153a6dd7458846396e2867282b428e7
+
+2020-07-02 17:19 +0000 [f8f934b545]  Nickolay Shmyrev <nshmyrev@alphacephei.com>
+
+	* res_http_websocket: Avoid reading past end of string
+
+	  We read beyond the end of the buffer when copying the string out of the
+	  buffer when we used ast_copy_string() because the original string was
+	  not null terminated. Instead switch to ast_strndup() which does not
+	  exhibit the same behavior.
+
+	  ASTERISK-28975 #close
+
+	  Change-Id: Ib4a75cffeb1eb8cf01136ef30306bd623e531a2a
+
+2020-07-09 10:27 +0000 [77a5383957]  Asterisk Development Team <asteriskteam@digium.com>
+
+	* Update CHANGES and UPGRADE.txt for 13.35.0
 2020-07-09 15:33 +0000  Asterisk Development Team <asteriskteam@digium.com>
 
 	* asterisk 13.35.0-rc1 Released.

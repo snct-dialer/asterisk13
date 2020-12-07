@@ -299,12 +299,22 @@ static void bridge_stasis_pull(struct ast_bridge *self, struct ast_bridge_channe
 	ast_bridge_base_v_table.pull(self, bridge_channel);
 }
 
-struct ast_bridge *bridge_stasis_new(uint32_t capabilities, unsigned int flags, const char *name, const char *id)
+struct ast_bridge *bridge_stasis_new(uint32_t capabilities, unsigned int flags, const char *name, const char *id, enum ast_bridge_video_mode_type video_mode)
 {
 	void *bridge;
 
 	bridge = bridge_alloc(sizeof(struct ast_bridge), &bridge_stasis_v_table);
 	bridge = bridge_base_init(bridge, capabilities, flags, "Stasis", name, id);
+	if (!bridge) {
+		return NULL;
+	}
+
+	if (video_mode == AST_BRIDGE_VIDEO_MODE_SINGLE_SRC) {
+		ast_bridge_set_single_src_video_mode(bridge, NULL);
+	} else {
+		ast_bridge_set_talker_src_video_mode(bridge);
+	}
+
 	bridge = bridge_register(bridge);
 
 	return bridge;

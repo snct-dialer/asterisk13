@@ -17,6 +17,9 @@ export DEB_BUILD_MAINT_OPTIONS = hardening=+all
 DPKG_EXPORT_BUILDFLAGS = 1
 include /usr/share/dpkg/buildflags.mk
 
+#DEB_BUILD_OPTIONS+=noopt
+#export DEB_BUILD_OPTIONS
+
 # Sanity check for a stable release:
 SAVED_ABI_HASH = 1fb7f5c06d7a2052e38d021b3d8ca151
 
