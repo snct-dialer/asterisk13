@@ -1193,3 +1193,15 @@ ALTER TABLE ps_systems ADD COLUMN disable_rport ENUM('0','1','off','on','false',
 
 UPDATE alembic_version SET version_num='79290b511e4b' WHERE alembic_version.version_num = '339e1dfa644d';
 
+-- Running upgrade 79290b511e4b -> 1ae0609b6646
+
+ALTER TABLE ps_contacts MODIFY reg_server VARCHAR(255) NULL;
+
+UPDATE alembic_version SET version_num='1ae0609b6646' WHERE alembic_version.version_num = '79290b511e4b';
+
+-- Running upgrade 1ae0609b6646 -> e658c26033ca
+
+ALTER TABLE ps_endpoints ADD COLUMN send_history_info ENUM('0','1','off','on','false','true','no','yes');
+
+UPDATE alembic_version SET version_num='e658c26033ca' WHERE alembic_version.version_num = '1ae0609b6646';
+

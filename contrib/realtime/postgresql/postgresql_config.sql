@@ -1289,5 +1289,17 @@ ALTER TABLE ps_systems ADD COLUMN disable_rport ast_bool_values;
 
 UPDATE alembic_version SET version_num='79290b511e4b' WHERE alembic_version.version_num = '339e1dfa644d';
 
+-- Running upgrade 79290b511e4b -> 1ae0609b6646
+
+ALTER TABLE ps_contacts ALTER COLUMN reg_server TYPE VARCHAR(255);
+
+UPDATE alembic_version SET version_num='1ae0609b6646' WHERE alembic_version.version_num = '79290b511e4b';
+
+-- Running upgrade 1ae0609b6646 -> e658c26033ca
+
+ALTER TABLE ps_endpoints ADD COLUMN send_history_info ast_bool_values;
+
+UPDATE alembic_version SET version_num='e658c26033ca' WHERE alembic_version.version_num = '1ae0609b6646';
+
 COMMIT;
 
